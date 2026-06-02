@@ -1,0 +1,1003 @@
+==================================================
+DAY 1 - DYNAMIC TABLES AND ELT IMPLEMENTATION
+==================================================
+
+DYNAMIC TABLES
+==============
+DYNAMIC TABLES SIMPLIFY DATA ENGINEERING IN SNOWFLAKE BY PROVIDING A RELIABLE, COST-EFFECTIVE, 
+AND AUTOMATED WAY TO TRANSFORM DATA. 
+INSTEAD OF MANAGING TRANSFORMATION STEPS WITH TASKS AND SCHEDULING, YOU DEFINE THE END STATE USING DYNAMIC TABLES 
+AND LET SNOWFLAKE HANDLE THE PIPELINE MANAGEMENT.
+
+HERE’S WHY THEY’RE BENEFICIAL:
+
+DECLARATIVE PROGRAMMING: DEFINE YOUR PIPELINE OUTCOMES USING DECLARATIVE SQL WITHOUT WORRYING ABOUT THE STEPS TO ACHIEVE 
+THEM, REDUCING COMPLEXITY.
+
+TRANSPARENT ORCHESTRATION: EASILY CREATE PIPELINES OF VARIOUS SHAPES, FROM LINEAR CHAINS TO DIRECTED GRAPHS, BY CHAINING 
+DYNAMIC TABLES TOGETHER. SNOWFLAKE MANAGES THE ORCHESTRATION AND SCHEDULING OF PIPELINE REFRESH BASED ON YOUR DATA
+FRESHNESS TARGET.
+
+PERFORMANCE BOOST WITH INCREMENTAL PROCESSING: FOR FAVORABLE WORKLOADS THAT ARE SUITED FOR INCREMENTAL PROCESSING, 
+DYNAMIC TABLES CAN PROVIDE A SIGNIFICANT PERFORMANCE IMPROVEMENT OVER FULL REFRESHES.
+
+EASY SWITCHING: TRANSITION SEAMLESSLY FROM BATCH TO STREAMING WITH A SINGLE ALTER DYNAMIC TABLE COMMAND. 
+YOU CONTROL HOW OFTEN DATA IS REFRESHED IN YOUR PIPELINE, WHICH HELPS BALANCE COST AND DATA FRESHNESS.
+
+OPERATIONALIZATION: DYNAMIC TABLES ARE FULLY OBSERVABLE AND MANAGEABLE THROUGH SNOWSIGHT, AND ALSO OFFER PROGRAMMATIC 
+ACCESS TO BUILD YOUR OWN OBSERVABILITY APPS.
+
+A DYNAMIC TABLE REFLECTS QUERY RESULTS, ELIMINATING THE NEED FOR A SEPARATE TARGET TABLE AND CUSTOM CODE FOR DATA 
+TRANSFORMATION. AN AUTOMATED PROCESS UPDATES THE RESULTS REGULARLY THROUGH SCHEDULED REFRESHES. SINCE A DYNAMIC TABLE’S
+CONTENT IS BASED ON THE QUERY, YOU CAN’T MODIFY IT USING DML OPERATIONS.THE AUTOMATED REFRESH PROCESS MATERIALIZES 
+QUERY RESULTS INTO THE DYNAMIC TABLE.
+
+DYNAMIC TABLES ARE A NEW TABLE TYPE IN SNOWFLAKE THAT LETS AUTOMATE INCREMENTAL DATA REFRESH WITH LOW LATENCY 
+USING SIMPLE SQL STATEMENT.
+
+PREVIOUSLY, DATA ENGINEERS WOULD USE STREASMS AND TASKS WITH MANUALLY MANAGING THE DATABASE 
+OBJECTS( TABLES, STREAMS, TASKS, SQL DML CODE) TO BUILD A DATA PIPELINE IN SNOWFLAKE. BUT WITH DYNAMIC TABLES DATA 
+PIPELINES GET MUCH EASIER.
+
+INSTEAD OF CREATING SEPARATE TARGET TABLE AND WRITING CODE TO TRANSFORM AND UPDATE THE DATA IN THAT TABLE, 
+YOU CAN DEFINE THE TARGET TABLE AS A DYNAMIC TABLE, AND USE CAN SPECIFY THE SQL STATMENT THAT PERFORM THE TRANSFORMATION.
+
+YOU DON'T INSERT/UPDATE/DELETE THE ROWS IN A DYNAMIC TABLE. THE AUTOMATED REFRESH PROCESS MATERIALIZES THE QUERY RESULTS 
+INTO A DYNAMIC TABLE.
+
+DYNAMIC TABLE SUPPORTS THE TIME TRAVEL, DATA SHARING AND REPLICATION.
+
+WHEN TO GO FOR DYNAMIC TABLES? 
+
+A. YOU DON'T WANT TO WRITE CODE TO TRACK DATA DEPENDENCIES AND MANAGE DATA REFRESH.
+B. YOU DON'T NEED, OR WANT TO AVOID THE COMPLEXITIES IN THE STREAMS AND TASKS.
+C. YOU WANT TO MATERIALIZES THE RESULTS OF A QUERY BASED ON MULTIPLE TABLES(WITH JOINS).
+D. YOU NEED TO BUILD MULTIPLE TABLES TO TRANSFORM DATA VIA ELT PIPELINE.
+
+---IMPLEMENTING AN ELT PIPELINE USING DYNAMIC TABLES
+===========================================================
+PHASE 1 //CREATING SOURCE LAYER//
+===========================================================
+use role sysadmin;
+use warehouse compute_wh;
+
+create or replace database dt_demo_db
+comment = 'this is dt_demo_db database for dynamic tables';
+
+
+create or replace schema source
+comment = 'this is source schema in dt_demo_db database';
+create or replace schema raw
+comment = 'this is raw schema in dt_demo_db database';
+create or replace schema clean
+comment = 'this is clean schema in dt_demo_db database';
+create or replace schema consumption
+comment = 'this is consumption schema in dt_demo_db database';
+
+-- change context
+use schema dt_demo_db.source;
+
+--create file format
+create OR REPLACE file format dt_demo_db.source.csv_format 
+type  = 'csv' 
+FIELD_DELIMITER =',' 
+skip_header = 1 
+FIELD_OPTIONALLY_ENCLOSED_BY='"' 
+NULL_IF = ('\N', 'NULL', '') 
+EMPTY_FIELD_AS_NULL=TRUE;
+
+show file formats;
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+reated_on             |name      |database_name|schema_name|type|owner   |comment|format_options                                                                                                                                                                                                                                                 |owner_role_type|
+----------------------+----------+-------------+-----------+----+--------+-------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+---------------+
+024-05-28 22:03:13.215|CSV_FORMAT|DT_DEMO_DB   |SOURCE     |CSV |SYSADMIN|       |{"TYPE":"csv","RECORD_DELIMITER":"\n","FIELD_DELIMITER":",","FILE_EXTENSION":null,"SKIP_HEADER":1,"PARSE_HEADER":false,"DATE_FORMAT":"AUTO","TIME_FORMAT":"AUTO","TIMESTAMP_FORMAT":"AUTO","BINARY_FORMAT":"HEX","ESCAPE":"NONE","ESCAPE_UNENCLOSED_FIELD":"\\"|ROLE           |
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+DESC FILE FORMAT CSV_FORMAT;
+-----------------------------------------------------------------------------
+property                      |property_type|property_value|property_default|
+------------------------------+-------------+--------------+----------------+
+TYPE                          |String       |csv           |CSV             |
+RECORD_DELIMITER              |String       |\n            |\n              |
+FIELD_DELIMITER               |String       |,             |,               |
+FILE_EXTENSION                |String       |              |                |
+SKIP_HEADER                   |Integer      |1             |0               |
+PARSE_HEADER                  |Boolean      |false         |false           |
+DATE_FORMAT                   |String       |AUTO          |AUTO            |
+TIME_FORMAT                   |String       |AUTO          |AUTO            |
+TIMESTAMP_FORMAT              |String       |AUTO          |AUTO            |
+BINARY_FORMAT                 |String       |HEX           |HEX             |
+ESCAPE                        |String       |NONE          |NONE            |
+ESCAPE_UNENCLOSED_FIELD       |String       |\\            |\\              |
+TRIM_SPACE                    |Boolean      |false         |false           |
+FIELD_OPTIONALLY_ENCLOSED_BY  |String       |\"            |NONE            |
+NULL_IF                       |List         |[N, NULL, ]   |[\\N]           |
+COMPRESSION                   |String       |AUTO          |AUTO            |
+ERROR_ON_COLUMN_COUNT_MISMATCH|Boolean      |true          |true            |
+VALIDATE_UTF8                 |Boolean      |true          |true            |
+SKIP_BLANK_LINES              |Boolean      |false         |false           |
+REPLACE_INVALID_CHARACTERS    |Boolean      |false         |false           |
+EMPTY_FIELD_AS_NULL           |Boolean      |true          |true            |
+SKIP_BYTE_ORDER_MARK          |Boolean      |true          |true            |
+ENCODING                      |String       |UTF8          |UTF8            |
+-----------------------------------------------------------------------------
+use role ACCOUNTADMIN;
+
+--create storage integration 
+create OR REPLACE storage integration s3_int
+  type = external_stage
+  storage_provider = 's3'
+  enabled = true
+  storage_aws_role_arn = 'arn:aws:iam::211125572618:role/snowflake_access_role'
+  storage_allowed_locations = ('s3://b21-bucket-20240528/ELT-Pipeline/Source/csv/');
+
+grant usage on integration s3_int to role sysadmin;
+
+use role SYSADMIN;
+
+show integrations;
+-----------------------------------------------------------------------
+name  |type          |category|enabled|comment|created_on             |
+------+--------------+--------+-------+-------+-----------------------+
+S3_INT|EXTERNAL_STAGE|STORAGE |true   |       |2024-05-29 00:12:18.438|
+-----------------------------------------------------------------------
+desc integration s3_int;
+--------------------------------------------------------------------------------------------------------------
+property                 |property_type|property_value                                      |property_default|
+-------------------------+-------------+----------------------------------------------------+----------------+
+ENABLED                  |Boolean      |true                                                |false           |
+STORAGE_PROVIDER         |String       |S3                                                  |                |
+STORAGE_ALLOWED_LOCATIONS|List         |s3://b21-bucket-20240528/ELT-Pipeline/Source/csv/   |[]              |
+STORAGE_BLOCKED_LOCATIONS|List         |                                                    |[]              |
+STORAGE_AWS_IAM_USER_ARN |String       |arn:aws:iam::891377375664:user/frtl0000-s           |                |
+STORAGE_AWS_ROLE_ARN     |String       |arn:aws:iam::211125572618:role/snowflake_access_role|                |
+STORAGE_AWS_EXTERNAL_ID  |String       |EP55372_SFCRole=2_bnRmyGkDLn+mRQDVBhngDMlweg4=      |                |
+COMMENT                  |String       |                                                    |                |
+--------------------------------------------------------------------------------------------------------------
+create or replace stage dt_demo_db.source.dynamic_tbl_stage
+storage_integration = s3_int
+url = 's3://b21-bucket-20240528/ELT-Pipeline/Source/csv/'
+file_format = csv_format;
+
+DESC STAGE dt_demo_db.source.dynamic_tbl_stage;
+----------------------------------------------------------------------------------------------------------------------------
+parent_property   |property           |property_type|property_value                                       |property_default|
+------------------+-------------------+-------------+-----------------------------------------------------+----------------+
+STAGE_FILE_FORMAT |FORMAT_NAME        |String       |csv_format                                           |                |
+STAGE_COPY_OPTIONS|ON_ERROR           |String       |ABORT_STATEMENT                                      |ABORT_STATEMENT |
+STAGE_COPY_OPTIONS|SIZE_LIMIT         |Long         |                                                     |                |
+STAGE_COPY_OPTIONS|PURGE              |Boolean      |false                                                |false           |
+STAGE_COPY_OPTIONS|RETURN_FAILED_ONLY |Boolean      |false                                                |false           |
+STAGE_COPY_OPTIONS|ENFORCE_LENGTH     |Boolean      |true                                                 |true            |
+STAGE_COPY_OPTIONS|TRUNCATECOLUMNS    |Boolean      |false                                                |false           |
+STAGE_COPY_OPTIONS|FORCE              |Boolean      |false                                                |false           |
+STAGE_LOCATION    |URL                |String       |["s3://b21-bucket-20240528/ELT-Pipeline/Source/csv/"]|                |
+STAGE_INTEGRATION |STORAGE_INTEGRATION|String       |S3_INT                                               |                |
+STAGE_CREDENTIALS |AWS_ROLE           |String       |arn:aws:iam::211125572618:role/snowflake_access_role |                |
+STAGE_CREDENTIALS |AWS_EXTERNAL_ID    |String       |EP55372_SFCRole=2_bnRmyGkDLn+mRQDVBhngDMlweg4=       |                |
+STAGE_CREDENTIALS |SNOWFLAKE_IAM_USER |String       |arn:aws:iam::891377375664:user/frtl0000-s            |                |
+DIRECTORY         |ENABLE             |Boolean      |false                                                |false           |
+DIRECTORY         |AUTO_REFRESH       |Boolean      |false                                                |false           |
+----------------------------------------------------------------------------------------------------------------------------
+
+Place the employee_records_1.csv in the s3 bucket s3://b21-bucket-20240528/ELT-Pipeline/Source/csv and list the files from the external stage object
+
+list @dt_demo_db.source.dynamic_tbl_stage;
+---------------------------------------------------------------------------------------------------------------------------------------------
+name                                                                   |size |md5                             |last_modified                |
+-----------------------------------------------------------------------+-----+--------------------------------+-----------------------------+
+s3://b21-bucket-20240528/ELT-Pipeline/Source/csv/employee_records_1.csv|11274|42fe712a3c6384662e3a669432fc9d0b|Tue, 28 May 2024 12:56:28 GMT|
+---------------------------------------------------------------------------------------------------------------------------------------------   
+select 
+t.$1,t.$2,t.$3,t.$4,t.$5,t.$6,t.$7,t.$8,t.$9,t.$10,t.$11,
+current_timestamp(),
+metadata$file_row_number,
+metadata$filename
+from @dt_demo_db.source.dynamic_tbl_stage as t;
+
+sample records(20 records)
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+$1 |$2        |$3        |$4        |$5        |$6                              |$7                     |$8                           |$9|$10          |$11|CURRENT_TIMESTAMP()    |METADATA$FILE_ROW_NUMBER|METADATA$FILENAME                             |
+---+----------+----------+----------+----------+--------------------------------+-----------------------+-----------------------------+--+-------------+---+-----------------------+------------------------+----------------------------------------------+
+1  |Sarah     |Simpson   |1984-01-20|2019-08-01|sarah.simpson_1@gmail.com       |IT                     |Director                     |L2|Oita         |Yes|2024-05-29 00:22:38.475|                       1|ELT-Pipeline/Source/csv/employee_records_1.csv|
+2  |Anthony   |Wilkerson |1960-01-01|2023-04-20|anthony.wilkerson_2@gmail.com   |HR                     |Team Leader                  |L2|Leicester    |Yes|2024-05-29 00:22:38.475|                       2|ELT-Pipeline/Source/csv/employee_records_1.csv|
+3  |Heather   |Hahn      |2001-12-02|2019-06-17|heather.hahn_3@gmail.com        |Medical Affairs        |HR Business Partner          |L2|Leeds        |Yes|2024-05-29 00:22:38.475|                       3|ELT-Pipeline/Source/csv/employee_records_1.csv|
+4  |Jane      |Brady     |1980-04-17|2021-02-15|jane.brady_4@gmail.com          |Supply Chain Management|HR Business Partner          |L3|Newcastle    |Yes|2024-05-29 00:22:38.475|                       4|ELT-Pipeline/Source/csv/employee_records_1.csv|
+5  |William   |Dougherty |1993-10-07|2023-12-18|william.dougherty_5@gmail.com   |Sales                  |Data Analyst                 |L5|Nantes       |Yes|2024-05-29 00:22:38.475|                       5|ELT-Pipeline/Source/csv/employee_records_1.csv|
+6  |Shawn     |Hernandez |1977-09-24|2020-10-06|shawn.hernandez_6@gmail.com     |Sales                  |Director                     |L4|Mumbai       |Yes|2024-05-29 00:22:38.475|                       6|ELT-Pipeline/Source/csv/employee_records_1.csv|
+7  |Lisa      |Jones     |1969-01-21|2022-07-21|lisa.jones_7@gmail.com          |Clinical Operations    |Senior Vice President        |L2|Strasbourg   |Yes|2024-05-29 00:22:38.475|                       7|ELT-Pipeline/Source/csv/employee_records_1.csv|
+8  |Jonathan  |Cooper    |1977-10-08|2019-01-04|jonathan.cooper_8@gmail.com     |Research & Development |Research Scientist           |L1|Nottingham   |Yes|2024-05-29 00:22:38.475|                       8|ELT-Pipeline/Source/csv/employee_records_1.csv|
+9  |Paula     |Hernandez |1980-12-10|2020-04-18|paula.hernandez_9@gmail.com     |Legal                  |Finance Controller           |L1|Nagpur       |Yes|2024-05-29 00:22:38.475|                       9|ELT-Pipeline/Source/csv/employee_records_1.csv|
+10 |Janet     |Paul      |1958-11-08|2020-02-12|janet.paul_10@gmail.com         |Compliance             |Research Scientist           |L4|Seattle      |Yes|2024-05-29 00:22:38.475|                      10|ELT-Pipeline/Source/csv/employee_records_1.csv|
+11 |James     |Gomez     |1958-02-28|2019-11-27|james.gomez_11@gmail.com        |Medical Affairs        |IT Project Manager           |L2|Cardiff      |Yes|2024-05-29 00:22:38.475|                      11|ELT-Pipeline/Source/csv/employee_records_1.csv|
+12 |Donald    |Garcia    |1990-09-18|2023-08-22|donald.garcia_12@gmail.com      |Regulatory Affairs     |Regulatory Affairs Specialist|L1|Lucknow      |Yes|2024-05-29 00:22:38.475|                      12|ELT-Pipeline/Source/csv/employee_records_1.csv|
+13 |Kristie   |Kidd      |1967-02-12|2022-10-05|kristie.kidd_13@gmail.com       |Finance                |HR Business Partner          |L2|Kyoto        |Yes|2024-05-29 00:22:38.475|                      13|ELT-Pipeline/Source/csv/employee_records_1.csv|
+14 |Samantha  |Gonzalez  |1960-05-05|2021-12-22|samantha.gonzalez_14@gmail.com  |Legal                  |Medical Writer               |L5|Lille        |Yes|2024-05-29 00:22:38.475|                      14|ELT-Pipeline/Source/csv/employee_records_1.csv|
+15 |Ashley    |Arellano  |1972-11-08|2022-12-05|ashley.arellano_15@gmail.com    |Legal                  |Biostatistician              |L3|Lyon         |Yes|2024-05-29 00:22:38.475|                      15|ELT-Pipeline/Source/csv/employee_records_1.csv|
+16 |Kathryn   |Espinoza  |1979-08-05|2020-10-14|kathryn.espinoza_16@gmail.com   |Compliance             |Biostatistician              |L3|Lille        |Yes|2024-05-29 00:22:38.475|                      16|ELT-Pipeline/Source/csv/employee_records_1.csv|
+17 |Billy     |Hill      |1974-02-11|2022-06-05|billy.hill_17@gmail.com         |Legal                  |Systems Analyst              |L1|Chennai      |Yes|2024-05-29 00:22:38.475|                      17|ELT-Pipeline/Source/csv/employee_records_1.csv|
+18 |Mark      |Mann      |1959-08-26|2022-01-01|mark.mann_18@gmail.com          |IT                     |Medical Writer               |L3|Toulouse     |Yes|2024-05-29 00:22:38.475|                      18|ELT-Pipeline/Source/csv/employee_records_1.csv|
+19 |Emma      |Delgado   |1983-11-11|2021-11-09|emma.delgado_19@gmail.com       |Research & Development |Finance Controller           |L3|Oita         |Yes|2024-05-29 00:22:38.475|                      19|ELT-Pipeline/Source/csv/employee_records_1.csv|
+20 |Paige     |Baker     |1992-03-24|2019-04-15|paige.baker_20@gmail.com        |Clinical Operations    |Senior Vice President        |L3|Mumbai       |Yes|2024-05-29 00:22:38.475|                      20|ELT-Pipeline/Source/csv/employee_records_1.csv|
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+===========================================================
+Phase 2 //creating Raw or Bronce Layer//
+===========================================================
+
+use role sysadmin;
+use warehouse compute_wh;
+use schema dt_demo_db.raw;
+
+-- create an employee table
+create table dt_demo_db.raw.employee_raw (
+    emp_id text primary key,
+    first_name text,
+    last_name text,
+    date_of_birth date,
+    date_of_joining date,
+    email_address text,
+    department text,
+    designation text,
+    level text,
+    office_location text,
+    active text,
+    load_ts timestamp,
+    load_row_number number,
+    load_file_name text 
+);
+
+-- lets check the data
+select count(*) from dt_demo_db.raw.employee_raw; -- no data
+select * from dt_demo_db.raw.employee_raw; -- structure
+
+
+--Creating pipe to load data into raw_table
+--drop pipe my_pipe;
+
+create pipe  if not exists  dt_demo_db.raw.employee_pipe_raw
+  auto_ingest = true
+  as 
+  copy into dt_demo_db.raw.employee_raw from 
+  (
+   select 
+       t.$1,t.$2,t.$3,t.$4,t.$5,t.$6,t.$7,t.$8,t.$9,t.$10,t.$11,
+       current_timestamp(),
+       metadata$file_row_number,
+       metadata$filename
+   from @dt_demo_db.source.dynamic_tbl_stage as t
+   ) file_format=dt_demo_db.source.csv_format on_error=continue;
+   
+---------------------------------------------   
+status                                      |
+--------------------------------------------+
+Pipe EMPLOYEE_PIPE_RAW successfully created.|
+---------------------------------------------
+  
+
+show pipes;
+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+created_on             |name             |database_name|schema_name|definition                                                                                                                                                                                                                                                     |owner   |notification_channel                                                                            |comment|integration|pattern|error_integration|owner_role_type|invalid_reason|budget|
+-----------------------+-----------------+-------------+-----------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+--------+------------------------------------------------------------------------------------------------+-------+-----------+-------+-----------------+---------------+--------------+------+
+2024-05-29 00:28:26.083|EMPLOYEE_PIPE_RAW|DT_DEMO_DB   |RAW        |copy into dt_demo_db.raw.employee_raw from ¶  (¶   select ¶       t.$1,t.$2,t.$3,t.$4,t.$5,t.$6,t.$7,t.$8,t.$9,t.$10,t.$11,¶       current_timestamp(),¶       metadata$file_row_number,¶       metadata$filename¶   from @dt_demo_db.source.dynamic_tbl_stage |SYSADMIN|arn:aws:sqs:ap-southeast-2:891377375664:sf-snowpipe-AIDA47CR3LGYPJVVOBNCS-h7DfGvQkXO7XfC90d1ePNg|       |           |       |                 |ROLE           |              |      |
+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------  
+-- created a task that will refresh the pipe.   
+create or replace task dt_demo_db.raw.copy_emp_to_raw_task
+    warehouse = compute_wh
+    schedule = '3 minute'
+    as
+    alter pipe dt_demo_db.raw.employee_pipe_raw refresh;
+
+-- check the objects + task graph home home page.
+
+-- Make sure that your user must have necessary privileges.
+use role accountadmin;
+grant execute task, execute managed task on account to role sysadmin;
+use role sysadmin;
+
+
+-- lets resume the task
+alter task dt_demo_db.raw.copy_emp_to_raw_task resume;
+
+-- lets check the data
+select count(*) from dt_demo_db.raw.employee_raw; -- no data
+---------
+COUNT(*)|
+--------+
+       0|
+---------	   
+SELECT * FROM table(information_schema.task_history());
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+QUERY_ID|NAME                |DATABASE_NAME|SCHEMA_NAME|QUERY_TEXT                                         |CONDITION_TEXT|STATE    |ERROR_CODE|ERROR_MESSAGE|SCHEDULED_TIME         |QUERY_START_TIME|NEXT_SCHEDULED_TIME    |COMPLETED_TIME|ROOT_TASK_ID                        |GRAPH_VERSION|RUN_ID       |RETURN_VALUE|SCHEDULED_FROM|ATTEMPT_NUMBER|CONFIG|QUERY_HASH|QUERY_HASH_VERSION|QUERY_PARAMETERIZED_HASH|QUERY_PARAMETERIZED_HASH_VERSION|GRAPH_RUN_GROUP_ID                  |BACKFILL_INFO|
+--------+--------------------+-------------+-----------+---------------------------------------------------+--------------+---------+----------+-------------+-----------------------+----------------+-----------------------+--------------+------------------------------------+-------------+-------------+------------+--------------+--------------+------+----------+------------------+------------------------+--------------------------------+------------------------------------+-------------+
+        |COPY_EMP_TO_RAW_TASK|DT_DEMO_DB   |RAW        |alter pipe dt_demo_db.raw.employee_pipe_raw refresh|              |SCHEDULED|          |             |2024-05-29 00:33:45.386|                |2024-05-29 00:36:45.386|              |01b4a1c5-3e7f-5b67-0000-000000000004|            1|1716906825386|            |SCHEDULE      |             1|      |          |                  |                        |                                |1ff25b2d-0a54-4286-ab5f-7f5c38a6ab37|             |
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------		
+desc task dt_demo_db.raw.copy_emp_to_raw_task;
+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+created_on             |name                |id                                  |database_name|schema_name|owner   |comment|warehouse |schedule|predecessors|state  |definition                                         |condition|allow_overlapping_execution|error_integration|last_committed_on      |last_suspended_on|owner_role_type|config|budget|task_relations     |last_suspended_reason|
+-----------------------+--------------------+------------------------------------+-------------+-----------+--------+-------+----------+--------+------------+-------+---------------------------------------------------+---------+---------------------------+-----------------+-----------------------+-----------------+---------------+------+------+-------------------+---------------------+
+2024-05-29 00:29:29.065|COPY_EMP_TO_RAW_TASK|01b4a1c5-3e7f-5b67-0000-000000000004|DT_DEMO_DB   |RAW        |SYSADMIN|       |COMPUTE_WH|3 minute|[]          |started|alter pipe dt_demo_db.raw.employee_pipe_raw refresh|         |false                      |null             |2024-05-29 00:30:45.332|                 |ROLE           |      |      |{"Predecessors":[]}|                     |
+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+after 3 minutes the task triggers the snowpipe.
+SELECT * FROM table(information_schema.task_history());
+QUERY_ID                            |NAME                |DATABASE_NAME|SCHEMA_NAME|QUERY_TEXT                                         |CONDITION_TEXT|STATE    |ERROR_CODE|ERROR_MESSAGE|SCHEDULED_TIME         |QUERY_START_TIME       |NEXT_SCHEDULED_TIME    |COMPLETED_TIME         |ROOT_TASK_ID                        |GRAPH_VERSION|RUN_ID       |RETURN_VALUE|SCHEDULED_FROM|ATTEMPT_NUMBER|CONFIG|QUERY_HASH                      |QUERY_HASH_VERSION|QUERY_PARAMETERIZED_HASH        |QUERY_PARAMETERIZED_HASH_VERSION|GRAPH_RUN_GROUP_ID                  |BACKFILL_INFO|
+------------------------------------+--------------------+-------------+-----------+---------------------------------------------------+--------------+---------+----------+-------------+-----------------------+-----------------------+-----------------------+-----------------------+------------------------------------+-------------+-------------+------------+--------------+--------------+------+--------------------------------+------------------+--------------------------------+--------------------------------+------------------------------------+-------------+
+                                    |COPY_EMP_TO_RAW_TASK|DT_DEMO_DB   |RAW        |alter pipe dt_demo_db.raw.employee_pipe_raw refresh|              |SCHEDULED|          |             |2024-05-29 00:36:45.386|                       |2024-05-29 00:39:45.386|                       |01b4a1c5-3e7f-5b67-0000-000000000004|            1|1716907005386|            |SCHEDULE      |             1|      |                                |                  |                                |                                |ef044e98-b28f-4bdf-b0a7-da1caf932864|             |
+01b4a1c9-3202-974e-0001-c83600049562|COPY_EMP_TO_RAW_TASK|DT_DEMO_DB   |RAW        |alter pipe dt_demo_db.raw.employee_pipe_raw refresh|              |SUCCEEDED|          |             |2024-05-29 00:33:45.386|2024-05-29 00:33:48.552|2024-05-29 00:36:45.386|2024-05-29 00:33:49.093|01b4a1c5-3e7f-5b67-0000-000000000004|            1|1716906825386|            |SCHEDULE      |             1|      |56a7f6b253351f0f5392b3a9603781ad|                 2|56a7f6b253351f0f5392b3a9603781ad|                               1|1ff25b2d-0a54-4286-ab5f-7f5c38a6ab37|             |
+
+select count(*) from dt_demo_db.raw.employee_raw;
+---------
+COUNT(*)|
+--------+
+     100|
+---------	 
+select * from dt_demo_db.raw.employee_raw LIMIT 20;
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+EMP_ID|FIRST_NAME|LAST_NAME|DATE_OF_BIRTH|DATE_OF_JOINING|EMAIL_ADDRESS                 |DEPARTMENT             |DESIGNATION                  |LEVEL|OFFICE_LOCATION|ACTIVE|LOAD_TS                |LOAD_ROW_NUMBER|LOAD_FILE_NAME                                |
+------+----------+---------+-------------+---------------+------------------------------+-----------------------+-----------------------------+-----+---------------+------+-----------------------+---------------+----------------------------------------------+
+1     |Sarah     |Simpson  |   1984-01-20|     2019-08-01|sarah.simpson_1@gmail.com     |IT                     |Director                     |L2   |Oita           |Yes   |2024-05-28 07:34:00.846|              1|ELT-Pipeline/Source/csv/employee_records_1.csv|
+2     |Anthony   |Wilkerson|   1960-01-01|     2023-04-20|anthony.wilkerson_2@gmail.com |HR                     |Team Leader                  |L2   |Leicester      |Yes   |2024-05-28 07:34:00.846|              2|ELT-Pipeline/Source/csv/employee_records_1.csv|
+3     |Heather   |Hahn     |   2001-12-02|     2019-06-17|heather.hahn_3@gmail.com      |Medical Affairs        |HR Business Partner          |L2   |Leeds          |Yes   |2024-05-28 07:34:00.846|              3|ELT-Pipeline/Source/csv/employee_records_1.csv|
+4     |Jane      |Brady    |   1980-04-17|     2021-02-15|jane.brady_4@gmail.com        |Supply Chain Management|HR Business Partner          |L3   |Newcastle      |Yes   |2024-05-28 07:34:00.846|              4|ELT-Pipeline/Source/csv/employee_records_1.csv|
+5     |William   |Dougherty|   1993-10-07|     2023-12-18|william.dougherty_5@gmail.com |Sales                  |Data Analyst                 |L5   |Nantes         |Yes   |2024-05-28 07:34:00.846|              5|ELT-Pipeline/Source/csv/employee_records_1.csv|
+6     |Shawn     |Hernandez|   1977-09-24|     2020-10-06|shawn.hernandez_6@gmail.com   |Sales                  |Director                     |L4   |Mumbai         |Yes   |2024-05-28 07:34:00.846|              6|ELT-Pipeline/Source/csv/employee_records_1.csv|
+7     |Lisa      |Jones    |   1969-01-21|     2022-07-21|lisa.jones_7@gmail.com        |Clinical Operations    |Senior Vice President        |L2   |Strasbourg     |Yes   |2024-05-28 07:34:00.846|              7|ELT-Pipeline/Source/csv/employee_records_1.csv|
+8     |Jonathan  |Cooper   |   1977-10-08|     2019-01-04|jonathan.cooper_8@gmail.com   |Research & Development |Research Scientist           |L1   |Nottingham     |Yes   |2024-05-28 07:34:00.846|              8|ELT-Pipeline/Source/csv/employee_records_1.csv|
+9     |Paula     |Hernandez|   1980-12-10|     2020-04-18|paula.hernandez_9@gmail.com   |Legal                  |Finance Controller           |L1   |Nagpur         |Yes   |2024-05-28 07:34:00.846|              9|ELT-Pipeline/Source/csv/employee_records_1.csv|
+10    |Janet     |Paul     |   1958-11-08|     2020-02-12|janet.paul_10@gmail.com       |Compliance             |Research Scientist           |L4   |Seattle        |Yes   |2024-05-28 07:34:00.846|             10|ELT-Pipeline/Source/csv/employee_records_1.csv|
+11    |James     |Gomez    |   1958-02-28|     2019-11-27|james.gomez_11@gmail.com      |Medical Affairs        |IT Project Manager           |L2   |Cardiff        |Yes   |2024-05-28 07:34:00.846|             11|ELT-Pipeline/Source/csv/employee_records_1.csv|
+12    |Donald    |Garcia   |   1990-09-18|     2023-08-22|donald.garcia_12@gmail.com    |Regulatory Affairs     |Regulatory Affairs Specialist|L1   |Lucknow        |Yes   |2024-05-28 07:34:00.846|             12|ELT-Pipeline/Source/csv/employee_records_1.csv|
+13    |Kristie   |Kidd     |   1967-02-12|     2022-10-05|kristie.kidd_13@gmail.com     |Finance                |HR Business Partner          |L2   |Kyoto          |Yes   |2024-05-28 07:34:00.846|             13|ELT-Pipeline/Source/csv/employee_records_1.csv|
+14    |Samantha  |Gonzalez |   1960-05-05|     2021-12-22|samantha.gonzalez_14@gmail.com|Legal                  |Medical Writer               |L5   |Lille          |Yes   |2024-05-28 07:34:00.846|             14|ELT-Pipeline/Source/csv/employee_records_1.csv|
+15    |Ashley    |Arellano |   1972-11-08|     2022-12-05|ashley.arellano_15@gmail.com  |Legal                  |Biostatistician              |L3   |Lyon           |Yes   |2024-05-28 07:34:00.846|             15|ELT-Pipeline/Source/csv/employee_records_1.csv|
+16    |Kathryn   |Espinoza |   1979-08-05|     2020-10-14|kathryn.espinoza_16@gmail.com |Compliance             |Biostatistician              |L3   |Lille          |Yes   |2024-05-28 07:34:00.846|             16|ELT-Pipeline/Source/csv/employee_records_1.csv|
+17    |Billy     |Hill     |   1974-02-11|     2022-06-05|billy.hill_17@gmail.com       |Legal                  |Systems Analyst              |L1   |Chennai        |Yes   |2024-05-28 07:34:00.846|             17|ELT-Pipeline/Source/csv/employee_records_1.csv|
+18    |Mark      |Mann     |   1959-08-26|     2022-01-01|mark.mann_18@gmail.com        |IT                     |Medical Writer               |L3   |Toulouse       |Yes   |2024-05-28 07:34:00.846|             18|ELT-Pipeline/Source/csv/employee_records_1.csv|
+19    |Emma      |Delgado  |   1983-11-11|     2021-11-09|emma.delgado_19@gmail.com     |Research & Development |Finance Controller           |L3   |Oita           |Yes   |2024-05-28 07:34:00.846|             19|ELT-Pipeline/Source/csv/employee_records_1.csv|
+20    |Paige     |Baker    |   1992-03-24|     2019-04-15|paige.baker_20@gmail.com      |Clinical Operations    |Senior Vice President        |L3   |Mumbai         |Yes   |2024-05-28 07:34:00.846|             20|ELT-Pipeline/Source/csv/employee_records_1.csv|
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+===========================================================
+Phase 3 //creating Stage or Silver Layer//
+===========================================================
+
+use role sysadmin;
+use warehouse compute_wh;
+use schema dt_demo_db.clean;
+
+-- want to create a table that is equivalent to the output of following query
+select 
+    emp_id,
+    first_name,
+    last_name,
+    date_of_birth as dob,
+    date_of_joining as doj,
+    email_address as email,
+    department,
+    designation,
+    level,
+    office_location,
+    active as active_flag
+from 
+    dt_demo_db.raw.employee_raw 
+    where active = 'Yes'
+	Limit 20;
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+EMP_ID|FIRST_NAME|LAST_NAME|DOB       |DOJ       |EMAIL                         |DEPARTMENT             |DESIGNATION                  |LEVEL|OFFICE_LOCATION|ACTIVE_FLAG|
+------+----------+---------+----------+----------+------------------------------+-----------------------+-----------------------------+-----+---------------+-----------+
+1     |Sarah     |Simpson  |1984-01-20|2019-08-01|sarah.simpson_1@gmail.com     |IT                     |Director                     |L2   |Oita           |Yes        |
+2     |Anthony   |Wilkerson|1960-01-01|2023-04-20|anthony.wilkerson_2@gmail.com |HR                     |Team Leader                  |L2   |Leicester      |Yes        |
+3     |Heather   |Hahn     |2001-12-02|2019-06-17|heather.hahn_3@gmail.com      |Medical Affairs        |HR Business Partner          |L2   |Leeds          |Yes        |
+4     |Jane      |Brady    |1980-04-17|2021-02-15|jane.brady_4@gmail.com        |Supply Chain Management|HR Business Partner          |L3   |Newcastle      |Yes        |
+5     |William   |Dougherty|1993-10-07|2023-12-18|william.dougherty_5@gmail.com |Sales                  |Data Analyst                 |L5   |Nantes         |Yes        |
+6     |Shawn     |Hernandez|1977-09-24|2020-10-06|shawn.hernandez_6@gmail.com   |Sales                  |Director                     |L4   |Mumbai         |Yes        |
+7     |Lisa      |Jones    |1969-01-21|2022-07-21|lisa.jones_7@gmail.com        |Clinical Operations    |Senior Vice President        |L2   |Strasbourg     |Yes        |
+8     |Jonathan  |Cooper   |1977-10-08|2019-01-04|jonathan.cooper_8@gmail.com   |Research & Development |Research Scientist           |L1   |Nottingham     |Yes        |
+9     |Paula     |Hernandez|1980-12-10|2020-04-18|paula.hernandez_9@gmail.com   |Legal                  |Finance Controller           |L1   |Nagpur         |Yes        |
+10    |Janet     |Paul     |1958-11-08|2020-02-12|janet.paul_10@gmail.com       |Compliance             |Research Scientist           |L4   |Seattle        |Yes        |
+11    |James     |Gomez    |1958-02-28|2019-11-27|james.gomez_11@gmail.com      |Medical Affairs        |IT Project Manager           |L2   |Cardiff        |Yes        |
+12    |Donald    |Garcia   |1990-09-18|2023-08-22|donald.garcia_12@gmail.com    |Regulatory Affairs     |Regulatory Affairs Specialist|L1   |Lucknow        |Yes        |
+13    |Kristie   |Kidd     |1967-02-12|2022-10-05|kristie.kidd_13@gmail.com     |Finance                |HR Business Partner          |L2   |Kyoto          |Yes        |
+14    |Samantha  |Gonzalez |1960-05-05|2021-12-22|samantha.gonzalez_14@gmail.com|Legal                  |Medical Writer               |L5   |Lille          |Yes        |
+15    |Ashley    |Arellano |1972-11-08|2022-12-05|ashley.arellano_15@gmail.com  |Legal                  |Biostatistician              |L3   |Lyon           |Yes        |
+16    |Kathryn   |Espinoza |1979-08-05|2020-10-14|kathryn.espinoza_16@gmail.com |Compliance             |Biostatistician              |L3   |Lille          |Yes        |
+17    |Billy     |Hill     |1974-02-11|2022-06-05|billy.hill_17@gmail.com       |Legal                  |Systems Analyst              |L1   |Chennai        |Yes        |
+18    |Mark      |Mann     |1959-08-26|2022-01-01|mark.mann_18@gmail.com        |IT                     |Medical Writer               |L3   |Toulouse       |Yes        |
+19    |Emma      |Delgado  |1983-11-11|2021-11-09|emma.delgado_19@gmail.com     |Research & Development |Finance Controller           |L3   |Oita           |Yes        |
+20    |Paige     |Baker    |1992-03-24|2019-04-15|paige.baker_20@gmail.com      |Clinical Operations    |Senior Vice President        |L3   |Mumbai         |Yes        |
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+-- create a dynamic table.. and here is the structure
+create or replace dynamic table 
+    dt_demo_db.clean.employees_clean_dt
+    (
+        emp_id,
+        first_name,
+        last_name,
+        dob comment 'Date of Birth',
+        doj comment 'Date of Joining',
+        email comment 'Email Address',
+        department,
+        designation,
+        emp_level,
+        office_location,
+        active_flag comment 'Employee Status' 
+    )
+    target_lag = '2 minutes'
+    warehouse = compute_wh
+AS
+select 
+    emp_id,
+    first_name,
+    last_name,
+    date_of_birth,
+    date_of_joining,
+    email_address,
+    department,
+    designation,
+    level,
+    office_location,
+    active
+from 
+    dt_demo_db.raw.employee_raw 
+    where active = 'Yes';
+	
+show dynamic tables;
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+created_on             |name              |database_name|schema_name|cluster_by|rows|bytes|owner   |target_lag|refresh_mode|refresh_mode_reason|warehouse |comment|text                                                                                                                                                                                                                                                           |automatic_clustering|scheduling_state|last_suspended_on|is_clone|is_replica|data_timestamp         |owner_role_type|
+-----------------------+------------------+-------------+-----------+----------+----+-----+--------+----------+------------+-------------------+----------+-------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+--------------------+----------------+-----------------+--------+----------+-----------------------+---------------+
+2024-05-29 00:51:10.040|EMPLOYEES_CLEAN_DT|DT_DEMO_DB   |CLEAN      |          |  95|12800|SYSADMIN|2 minutes |INCREMENTAL |                   |COMPUTE_WH|       |create or replace dynamic table ¶    dt_demo_db.clean.employees_clean_dt¶    (¶        emp_id,¶        first_name,¶        last_name,¶        dob comment 'Date of Birth',¶        doj comment 'Date of Joining',¶        email comment 'Email Address',¶      |OFF                 |ACTIVE          |                 |false   |false     |2024-05-29 00:51:10.555|ROLE           |
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+SELECT current_timestamp() AS timestamp, count(1) rec_count FROM  dt_demo_db.clean.employees_clean_dt;
+----------------------------------
+TIMESTAMP              |REC_COUNT|
+-----------------------+---------+
+2024-05-29 00:56:50.775|       95|
+----------------------------------
+-- now lets load the data...
+--Upload one new file to s3 bucket and observe the Dynamic table behaviour.
+
+checking the records in the raw layer, expected 110 records within 2 minutes we place the new file (new file contains 10 records).
+
+SELECT current_timestamp() AS timestamp, count(1) rec_count FROM  dt_demo_db.raw.employee_raw;
+----------------------------------
+TIMESTAMP              |REC_COUNT|
+-----------------------+---------+
+2024-05-29 00:58:50.775|      110|
+----------------------------------
+
+checking the count in the dynamic table
+SELECT current_timestamp() AS timestamp, count(1) rec_count FROM  dt_demo_db.clean.employees_clean_dt;
+----------------------------------
+TIMESTAMP              |REC_COUNT|
+-----------------------+---------+
+2024-05-29 01:00:10.615|      104|
+----------------------------------
+
+-- Perform different insert/updated/delete operations
+
+-- bulk delete
+-- check the employee records in raw layer
+delete from dt_demo_db.raw.employee_raw where emp_id between 1 and 10; 
+
+--query dynamic tables
+
+select current_timestamp() AS timestamp,e.* from dt_demo_db.clean.employees_clean_dt e WHERE emp_id between 1 and 10;
+TIMESTAMP|EMP_ID|FIRST_NAME|LAST_NAME|DOB|DOJ|EMAIL|DEPARTMENT|DESIGNATION|EMP_LEVEL|OFFICE_LOCATION|ACTIVE_FLAG|
+---------+------+----------+---------+---+---+-----+----------+-----------+---------+---------------+-----------+
+
+-- bulk update
+select * from dt_demo_db.raw.employee_raw where 
+    level = 'L1' and 
+    emp_id between 11 and 20;
+
+EMP_ID,FIRST_NAME,LAST_NAME,DATE_OF_BIRTH,DATE_OF_JOINING,EMAIL_ADDRESS,DEPARTMENT,DESIGNATION,LEVEL,OFFICE_LOCATION,ACTIVE,LOAD_TS,LOAD_ROW_NUMBER,LOAD_FILE_NAME
+12,Donald,Garcia,1990-09-18,2023-08-22,donald.garcia_12@gmail.com,Regulatory Affairs,Regulatory Affairs Specialist,L1,Lucknow,Yes,2024-12-15 00:09:40.982,12,ELT-Pipeline/source/csv/employee_records_1.csv
+17,Billy,Hill,1974-02-11,2022-06-05,billy.hill_17@gmail.com,Legal,Systems Analyst,L1,Chennai,Yes,2024-12-15 00:09:40.982,17,ELT-Pipeline/source/csv/employee_records_1.csv
+
+update dt_demo_db.raw.employee_raw set level = 'L0'
+where 
+    level = 'L1' and 
+    emp_id between 11 and 20;
+	
+number of rows updated	number of multi-joined rows updated
+                    2	                                 0
+	
+query dynamic table immediate and after 2 minutes check for level 
+
+1.immidiate
+select current_timestamp() AS timestamp,e.* from dt_demo_db.clean.employees_clean_dt e WHERE emp_id between 11 and 20;
+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+TIMESTAMP              |EMP_ID|FIRST_NAME|LAST_NAME|DOB       |DOJ       |EMAIL                         |DEPARTMENT            |DESIGNATION                  |EMP_LEVEL|OFFICE_LOCATION|ACTIVE_FLAG|
+-----------------------+------+----------+---------+----------+----------+------------------------------+----------------------+-----------------------------+---------+---------------+-----------+
+2024-05-29 01:07:33.455|11    |James     |Gomez    |1958-02-28|2019-11-27|james.gomez_11@gmail.com      |Medical Affairs       |IT Project Manager           |L2       |Cardiff        |Yes        |
+2024-05-29 01:07:33.455|12    |Donald    |Garcia   |1990-09-18|2023-08-22|donald.garcia_12@gmail.com    |Regulatory Affairs    |Regulatory Affairs Specialist|L1       |Lucknow        |Yes        |
+2024-05-29 01:07:33.455|13    |Kristie   |Kidd     |1967-02-12|2022-10-05|kristie.kidd_13@gmail.com     |Finance               |HR Business Partner          |L2       |Kyoto          |Yes        |
+2024-05-29 01:07:33.455|14    |Samantha  |Gonzalez |1960-05-05|2021-12-22|samantha.gonzalez_14@gmail.com|Legal                 |Medical Writer               |L5       |Lille          |Yes        |
+2024-05-29 01:07:33.455|15    |Ashley    |Arellano |1972-11-08|2022-12-05|ashley.arellano_15@gmail.com  |Legal                 |Biostatistician              |L3       |Lyon           |Yes        |
+2024-05-29 01:07:33.455|16    |Kathryn   |Espinoza |1979-08-05|2020-10-14|kathryn.espinoza_16@gmail.com |Compliance            |Biostatistician              |L3       |Lille          |Yes        |
+2024-05-29 01:07:33.455|17    |Billy     |Hill     |1974-02-11|2022-06-05|billy.hill_17@gmail.com       |Legal                 |Systems Analyst              |L1       |Chennai        |Yes        |
+2024-05-29 01:07:33.455|18    |Mark      |Mann     |1959-08-26|2022-01-01|mark.mann_18@gmail.com        |IT                    |Medical Writer               |L3       |Toulouse       |Yes        |
+2024-05-29 01:07:33.455|19    |Emma      |Delgado  |1983-11-11|2021-11-09|emma.delgado_19@gmail.com     |Research & Development|Finance Controller           |L3       |Oita           |Yes        |
+2024-05-29 01:07:33.455|20    |Paige     |Baker    |1992-03-24|2019-04-15|paige.baker_20@gmail.com      |Clinical Operations   |Senior Vice President        |L3       |Mumbai         |Yes        |
+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+after 2 minutes
+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+TIMESTAMP              |EMP_ID|FIRST_NAME|LAST_NAME|DOB       |DOJ       |EMAIL                         |DEPARTMENT            |DESIGNATION                  |EMP_LEVEL|OFFICE_LOCATION|ACTIVE_FLAG|
+-----------------------+------+----------+---------+----------+----------+------------------------------+----------------------+-----------------------------+---------+---------------+-----------+
+2024-05-29 01:11:28.375|17    |Billy     |Hill     |1974-02-11|2022-06-05|billy.hill_17@gmail.com       |Legal                 |Systems Analyst              |L0       |Chennai        |Yes        |
+2024-05-29 01:11:28.375|11    |James     |Gomez    |1958-02-28|2019-11-27|james.gomez_11@gmail.com      |Medical Affairs       |IT Project Manager           |L2       |Cardiff        |Yes        |
+2024-05-29 01:11:28.375|13    |Kristie   |Kidd     |1967-02-12|2022-10-05|kristie.kidd_13@gmail.com     |Finance               |HR Business Partner          |L2       |Kyoto          |Yes        |
+2024-05-29 01:11:28.375|14    |Samantha  |Gonzalez |1960-05-05|2021-12-22|samantha.gonzalez_14@gmail.com|Legal                 |Medical Writer               |L5       |Lille          |Yes        |
+2024-05-29 01:11:28.375|15    |Ashley    |Arellano |1972-11-08|2022-12-05|ashley.arellano_15@gmail.com  |Legal                 |Biostatistician              |L3       |Lyon           |Yes        |
+2024-05-29 01:11:28.375|16    |Kathryn   |Espinoza |1979-08-05|2020-10-14|kathryn.espinoza_16@gmail.com |Compliance            |Biostatistician              |L3       |Lille          |Yes        |
+2024-05-29 01:11:28.375|18    |Mark      |Mann     |1959-08-26|2022-01-01|mark.mann_18@gmail.com        |IT                    |Medical Writer               |L3       |Toulouse       |Yes        |
+2024-05-29 01:11:28.375|19    |Emma      |Delgado  |1983-11-11|2021-11-09|emma.delgado_19@gmail.com     |Research & Development|Finance Controller           |L3       |Oita           |Yes        |
+2024-05-29 01:11:28.375|20    |Paige     |Baker    |1992-03-24|2019-04-15|paige.baker_20@gmail.com      |Clinical Operations   |Senior Vice President        |L3       |Mumbai         |Yes        |
+2024-05-29 01:11:28.375|12    |Donald    |Garcia   |1990-09-18|2023-08-22|donald.garcia_12@gmail.com    |Regulatory Affairs    |Regulatory Affairs Specialist|L0       |Lucknow        |Yes        |
+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+To check the dynamic table refresh details, use the below query.
+
+SELECT * FROM table(information_schema.DYNAMIC_TABLE_REFRESH_HISTORY());
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+NAME              |SCHEMA_NAME|DATABASE_NAME|STATE    |STATE_CODE|STATE_MESSAGE|QUERY_ID                            |DATA_TIMESTAMP         |GRAPH_HISTORY_VALID_FROM|REFRESH_START_TIME     |REFRESH_END_TIME       |COMPLETION_TARGET      |TARGET_LAG_SEC|QUALIFIED_NAME                     |LAST_COMPLETED_DEPENDENCY|STATISTICS                                                                                                                       |REFRESH_ACTION|REFRESH_TRIGGER|
+------------------+-----------+-------------+---------+----------+-------------+------------------------------------+-----------------------+------------------------+-----------------------+-----------------------+-----------------------+--------------+-----------------------------------+-------------------------+---------------------------------------------------------------------------------------------------------------------------------+--------------+---------------+
+EMPLOYEES_CLEAN_DT|CLEAN      |DT_DEMO_DB   |SUCCEEDED|SUCCESS   |             |01b4a1fa-3202-9797-0001-c8360004a3f6|2024-05-29 01:21:54.489| 2024-05-29 00:51:11.784|2024-05-29 01:22:05.442|2024-05-29 01:22:05.864|2024-05-29 01:22:18.489|              |DT_DEMO_DB.CLEAN.EMPLOYEES_CLEAN_DT|{}                       |{¶  "numAddedPartitions": 0,¶  "numCopiedRows": 0,¶  "numDeletedRows": 0,¶  "numInsertedRows": 0,¶  "numRemovedPartitions": 0¶}  |INCREMENTAL   |SCHEDULED      |
+EMPLOYEES_CLEAN_DT|CLEAN      |DT_DEMO_DB   |SUCCEEDED|SUCCESS   |             |01b4a1f8-3202-975f-0001-c8360004e522|2024-05-29 01:20:18.489| 2024-05-29 00:51:11.784|2024-05-29 01:20:25.545|2024-05-29 01:20:26.068|2024-05-29 01:20:42.489|              |DT_DEMO_DB.CLEAN.EMPLOYEES_CLEAN_DT|{}                       |{¶  "numAddedPartitions": 0,¶  "numCopiedRows": 0,¶  "numDeletedRows": 0,¶  "numInsertedRows": 0,¶  "numRemovedPartitions": 0¶}  |INCREMENTAL   |SCHEDULED      |
+EMPLOYEES_CLEAN_DT|CLEAN      |DT_DEMO_DB   |SUCCEEDED|SUCCESS   |             |01b4a1f6-3202-9823-0001-c8360005112e|2024-05-29 01:18:42.489| 2024-05-29 00:51:11.784|2024-05-29 01:18:47.744|2024-05-29 01:18:47.986|2024-05-29 01:19:06.489|              |DT_DEMO_DB.CLEAN.EMPLOYEES_CLEAN_DT|{}                       |{¶  "numAddedPartitions": 0,¶  "numCopiedRows": 0,¶  "numDeletedRows": 0,¶  "numInsertedRows": 0,¶  "numRemovedPartitions": 0¶}  |NO_DATA       |SCHEDULED      |
+EMPLOYEES_CLEAN_DT|CLEAN      |DT_DEMO_DB   |SUCCEEDED|SUCCESS   |             |01b4a1f5-3202-975f-0001-c8360004e512|2024-05-29 01:17:06.489| 2024-05-29 00:51:11.784|2024-05-29 01:17:15.473|2024-05-29 01:17:15.960|2024-05-29 01:17:30.489|              |DT_DEMO_DB.CLEAN.EMPLOYEES_CLEAN_DT|{}                       |{¶  "numAddedPartitions": 0,¶  "numCopiedRows": 0,¶  "numDeletedRows": 0,¶  "numInsertedRows": 0,¶  "numRemovedPartitions": 0¶}  |INCREMENTAL   |SCHEDULED      |
+EMPLOYEES_CLEAN_DT|CLEAN      |DT_DEMO_DB   |SUCCEEDED|SUCCESS   |             |01b4a1f3-3202-974e-0001-c8360004968e|2024-05-29 01:15:30.489| 2024-05-29 00:51:11.784|2024-05-29 01:15:38.481|2024-05-29 01:15:38.678|2024-05-29 01:15:54.489|              |DT_DEMO_DB.CLEAN.EMPLOYEES_CLEAN_DT|{}                       |{¶  "numAddedPartitions": 0,¶  "numCopiedRows": 0,¶  "numDeletedRows": 0,¶  "numInsertedRows": 0,¶  "numRemovedPartitions": 0¶}  |NO_DATA       |SCHEDULED      |
+EMPLOYEES_CLEAN_DT|CLEAN      |DT_DEMO_DB   |SUCCEEDED|SUCCESS   |             |01b4a1f2-3202-9797-0001-c8360004a3c6|2024-05-29 01:13:54.489| 2024-05-29 00:51:11.784|2024-05-29 01:14:05.502|2024-05-29 01:14:06.054|2024-05-29 01:14:18.489|              |DT_DEMO_DB.CLEAN.EMPLOYEES_CLEAN_DT|{}                       |{¶  "numAddedPartitions": 0,¶  "numCopiedRows": 0,¶  "numDeletedRows": 0,¶  "numInsertedRows": 0,¶  "numRemovedPartitions": 0¶}  |INCREMENTAL   |SCHEDULED      |
+EMPLOYEES_CLEAN_DT|CLEAN      |DT_DEMO_DB   |SUCCEEDED|SUCCESS   |             |01b4a1f0-3202-97fa-0001-c8360004c452|2024-05-29 01:12:18.489| 2024-05-29 00:51:11.784|2024-05-29 01:12:37.091|2024-05-29 01:12:37.337|2024-05-29 01:12:42.489|              |DT_DEMO_DB.CLEAN.EMPLOYEES_CLEAN_DT|{}                       |{¶  "numAddedPartitions": 0,¶  "numCopiedRows": 0,¶  "numDeletedRows": 0,¶  "numInsertedRows": 0,¶  "numRemovedPartitions": 0¶}  |NO_DATA       |SCHEDULED      |
+EMPLOYEES_CLEAN_DT|CLEAN      |DT_DEMO_DB   |SUCCEEDED|SUCCESS   |             |01b4a1ee-3202-9797-0001-c8360004a3b6|2024-05-29 01:10:42.489| 2024-05-29 00:51:11.784|2024-05-29 01:10:55.349|2024-05-29 01:10:55.908|2024-05-29 01:11:06.489|              |DT_DEMO_DB.CLEAN.EMPLOYEES_CLEAN_DT|{}                       |{¶  "numAddedPartitions": 0,¶  "numCopiedRows": 0,¶  "numDeletedRows": 0,¶  "numInsertedRows": 0,¶  "numRemovedPartitions": 0¶}  |INCREMENTAL   |SCHEDULED      |
+EMPLOYEES_CLEAN_DT|CLEAN      |DT_DEMO_DB   |SUCCEEDED|SUCCESS   |             |01b4a1ed-3202-97f9-0001-c8360004f1ba|2024-05-29 01:09:06.489| 2024-05-29 00:51:11.784|2024-05-29 01:09:09.816|2024-05-29 01:09:10.018|2024-05-29 01:09:30.489|              |DT_DEMO_DB.CLEAN.EMPLOYEES_CLEAN_DT|{}                       |{¶  "numAddedPartitions": 0,¶  "numCopiedRows": 0,¶  "numDeletedRows": 0,¶  "numInsertedRows": 0,¶  "numRemovedPartitions": 0¶}  |NO_DATA       |SCHEDULED      |
+EMPLOYEES_CLEAN_DT|CLEAN      |DT_DEMO_DB   |SUCCEEDED|SUCCESS   |             |01b4a1eb-3202-974e-0001-c8360004962a|2024-05-29 01:07:30.489| 2024-05-29 00:51:11.784|2024-05-29 01:07:38.363|2024-05-29 01:07:39.150|2024-05-29 01:07:54.489|              |DT_DEMO_DB.CLEAN.EMPLOYEES_CLEAN_DT|{}                       |{¶  "numAddedPartitions": 1,¶  "numCopiedRows": 83,¶  "numDeletedRows": 2,¶  "numInsertedRows": 2,¶  "numRemovedPartitions": 1¶} |INCREMENTAL   |SCHEDULED      |
+EMPLOYEES_CLEAN_DT|CLEAN      |DT_DEMO_DB   |SUCCEEDED|SUCCESS   |             |01b4a1ea-3202-9823-0001-c836000510b2|2024-05-29 01:05:54.489| 2024-05-29 00:51:11.784|2024-05-29 01:06:07.832|2024-05-29 01:06:08.080|2024-05-29 01:06:18.489|              |DT_DEMO_DB.CLEAN.EMPLOYEES_CLEAN_DT|{}                       |{¶  "numAddedPartitions": 0,¶  "numCopiedRows": 0,¶  "numDeletedRows": 0,¶  "numInsertedRows": 0,¶  "numRemovedPartitions": 0¶}  |NO_DATA       |SCHEDULED      |
+EMPLOYEES_CLEAN_DT|CLEAN      |DT_DEMO_DB   |SUCCEEDED|SUCCESS   |             |01b4a1e8-3202-97f9-0001-c8360004f17e|2024-05-29 01:04:18.489| 2024-05-29 00:51:11.784|2024-05-29 01:04:30.008|2024-05-29 01:04:31.418|2024-05-29 01:04:42.489|              |DT_DEMO_DB.CLEAN.EMPLOYEES_CLEAN_DT|{}                       |{¶  "numAddedPartitions": 1,¶  "numCopiedRows": 85,¶  "numDeletedRows": 10,¶  "numInsertedRows": 0,¶  "numRemovedPartitions": 1¶}|INCREMENTAL   |SCHEDULED      |
+EMPLOYEES_CLEAN_DT|CLEAN      |DT_DEMO_DB   |SUCCEEDED|SUCCESS   |             |01b4a1e6-3202-97fa-0001-c8360004c40e|2024-05-29 01:02:42.489| 2024-05-29 00:51:11.784|2024-05-29 01:02:46.932|2024-05-29 01:02:47.492|2024-05-29 01:03:06.489|              |DT_DEMO_DB.CLEAN.EMPLOYEES_CLEAN_DT|{}                       |{¶  "numAddedPartitions": 0,¶  "numCopiedRows": 0,¶  "numDeletedRows": 0,¶  "numInsertedRows": 0,¶  "numRemovedPartitions": 0¶}  |INCREMENTAL   |SCHEDULED      |
+EMPLOYEES_CLEAN_DT|CLEAN      |DT_DEMO_DB   |SUCCEEDED|SUCCESS   |             |01b4a1e5-3202-97fa-0001-c8360004c402|2024-05-29 01:01:06.489| 2024-05-29 00:51:11.784|2024-05-29 01:01:27.666|2024-05-29 01:01:27.984|2024-05-29 01:01:30.489|              |DT_DEMO_DB.CLEAN.EMPLOYEES_CLEAN_DT|{}                       |{¶  "numAddedPartitions": 0,¶  "numCopiedRows": 0,¶  "numDeletedRows": 0,¶  "numInsertedRows": 0,¶  "numRemovedPartitions": 0¶}  |NO_DATA       |SCHEDULED      |
+EMPLOYEES_CLEAN_DT|CLEAN      |DT_DEMO_DB   |SUCCEEDED|SUCCESS   |             |01b4a1e3-3202-975f-0001-c8360004e462|2024-05-29 00:59:30.489| 2024-05-29 00:51:11.784|2024-05-29 00:59:45.636|2024-05-29 00:59:46.333|2024-05-29 00:59:54.489|              |DT_DEMO_DB.CLEAN.EMPLOYEES_CLEAN_DT|{}                       |{¶  "numAddedPartitions": 1,¶  "numCopiedRows": 0,¶  "numDeletedRows": 0,¶  "numInsertedRows": 9,¶  "numRemovedPartitions": 0¶}  |INCREMENTAL   |SCHEDULED      |
+EMPLOYEES_CLEAN_DT|CLEAN      |DT_DEMO_DB   |SUCCEEDED|SUCCESS   |             |01b4a1e2-3202-97fa-0001-c8360004c3d2|2024-05-29 00:57:54.489| 2024-05-29 00:51:11.784|2024-05-29 00:58:07.044|2024-05-29 00:58:07.511|2024-05-29 00:58:18.489|              |DT_DEMO_DB.CLEAN.EMPLOYEES_CLEAN_DT|{}                       |{¶  "numAddedPartitions": 0,¶  "numCopiedRows": 0,¶  "numDeletedRows": 0,¶  "numInsertedRows": 0,¶  "numRemovedPartitions": 0¶}  |INCREMENTAL   |SCHEDULED      |
+EMPLOYEES_CLEAN_DT|CLEAN      |DT_DEMO_DB   |SUCCEEDED|SUCCESS   |             |01b4a1e0-3202-975f-0001-c8360004e412|2024-05-29 00:56:18.489| 2024-05-29 00:51:11.784|2024-05-29 00:56:36.128|2024-05-29 00:56:36.715|2024-05-29 00:56:42.489|              |DT_DEMO_DB.CLEAN.EMPLOYEES_CLEAN_DT|{}                       |{¶  "numAddedPartitions": 0,¶  "numCopiedRows": 0,¶  "numDeletedRows": 0,¶  "numInsertedRows": 0,¶  "numRemovedPartitions": 0¶}  |INCREMENTAL   |SCHEDULED      |
+EMPLOYEES_CLEAN_DT|CLEAN      |DT_DEMO_DB   |SUCCEEDED|SUCCESS   |             |01b4a1de-3202-975f-0001-c8360004e406|2024-05-29 00:54:42.489| 2024-05-29 00:51:11.784|2024-05-29 00:54:55.659|2024-05-29 00:54:55.900|2024-05-29 00:55:06.489|              |DT_DEMO_DB.CLEAN.EMPLOYEES_CLEAN_DT|{}                       |{¶  "numAddedPartitions": 0,¶  "numCopiedRows": 0,¶  "numDeletedRows": 0,¶  "numInsertedRows": 0,¶  "numRemovedPartitions": 0¶}  |NO_DATA       |SCHEDULED      |
+EMPLOYEES_CLEAN_DT|CLEAN      |DT_DEMO_DB   |SUCCEEDED|SUCCESS   |             |01b4a1dd-3202-97fa-0001-c8360004c392|2024-05-29 00:53:06.489| 2024-05-29 00:51:11.784|2024-05-29 00:53:17.001|2024-05-29 00:53:17.472|2024-05-29 00:53:30.489|              |DT_DEMO_DB.CLEAN.EMPLOYEES_CLEAN_DT|{}                       |{¶  "numAddedPartitions": 0,¶  "numCopiedRows": 0,¶  "numDeletedRows": 0,¶  "numInsertedRows": 0,¶  "numRemovedPartitions": 0¶}  |INCREMENTAL   |SCHEDULED      |
+EMPLOYEES_CLEAN_DT|CLEAN      |DT_DEMO_DB   |SUCCEEDED|SUCCESS   |             |01b4a1db-3202-974e-0001-c83600049596|2024-05-29 00:51:30.489| 2024-05-29 00:51:11.784|2024-05-29 00:51:40.199|2024-05-29 00:51:41.654|2024-05-29 00:53:30.489|              |DT_DEMO_DB.CLEAN.EMPLOYEES_CLEAN_DT|{}                       |{¶  "numAddedPartitions": 0,¶  "numCopiedRows": 0,¶  "numDeletedRows": 0,¶  "numInsertedRows": 0,¶  "numRemovedPartitions": 0¶}  |INCREMENTAL   |SCHEDULED      |
+EMPLOYEES_CLEAN_DT|CLEAN      |DT_DEMO_DB   |SUCCEEDED|SUCCESS   |             |01b4a1db-3202-97fa-0001-c8360004c36e|2024-05-29 00:51:10.555| 2024-05-29 00:51:11.784|2024-05-29 00:51:10.701|2024-05-29 00:51:11.691|2024-05-29 00:53:10.555|              |DT_DEMO_DB.CLEAN.EMPLOYEES_CLEAN_DT|{}                       |{¶  "numAddedPartitions": 1,¶  "numCopiedRows": 0,¶  "numDeletedRows": 0,¶  "numInsertedRows": 95,¶  "numRemovedPartitions": 0¶} |INCREMENTAL   |CREATION       |
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+suspend the dynamic table referesh to avoid unnecessary credits.
+
+alter dynamic table DT_DEMO_DB.CLEAN.EMPLOYEES_CLEAN_DT suspend;
+---------------------------------
+status                          |
+--------------------------------+
+Statement executed successfully.|
+---------------------------------
+check the scheduling_state 
+show dynamic tables;
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+created_on             |name              |database_name|schema_name|cluster_by|rows|bytes|owner   |target_lag|refresh_mode|refresh_mode_reason|warehouse |comment|text                                                                                                                                                                                                                                                           |automatic_clustering|scheduling_state|last_suspended_on      |is_clone|is_replica|data_timestamp         |owner_role_type|
+-----------------------+------------------+-------------+-----------+----------+----+-----+--------+----------+------------+-------------------+----------+-------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+--------------------+----------------+-----------------------+--------+----------+-----------------------+---------------+
+2024-05-29 00:51:10.040|EMPLOYEES_CLEAN_DT|DT_DEMO_DB   |CLEAN      |          |  94|18432|SYSADMIN|2 minutes |INCREMENTAL |                   |COMPUTE_WH|       |create or replace dynamic table ¶    dt_demo_db.clean.employees_clean_dt¶    (¶        emp_id,¶        first_name,¶        last_name,¶        dob comment 'Date of Birth',¶        doj comment 'Date of Joining',¶        email comment 'Email Address',¶      |OFF                 |SUSPENDED       |2024-05-29 01:28:39.310|false   |false     |2024-05-29 01:28:18.489|ROLE           |
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+finally suspend the task created in the raw layer which refresh the snowpipe.
+ALTER TASK  dt_demo_db.raw.copy_emp_to_raw_task SUSPEND;
+
+USE dt_demo_db.raw;
+SHOW tasks;
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+created_on             |name                |id                                  |database_name|schema_name|owner   |comment|warehouse |schedule|predecessors|state    |definition                                         |condition|allow_overlapping_execution|error_integration|last_committed_on      |last_suspended_on      |owner_role_type|config|budget|task_relations     |last_suspended_reason|
+-----------------------+--------------------+------------------------------------+-------------+-----------+--------+-------+----------+--------+------------+---------+---------------------------------------------------+---------+---------------------------+-----------------+-----------------------+-----------------------+---------------+------+------+-------------------+---------------------+
+2024-05-29 00:29:29.065|COPY_EMP_TO_RAW_TASK|01b4a1c5-3e7f-5b67-0000-000000000004|DT_DEMO_DB   |RAW        |SYSADMIN|       |COMPUTE_WH|3 minute|[]          |suspended|alter pipe dt_demo_db.raw.employee_pipe_raw refresh|         |false                      |null             |2024-05-29 00:30:45.332|2024-05-29 01:31:56.917|ROLE           |      |      |{"Predecessors":[]}|USER_SUSPENDED       |
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+=================================================================================================================
+Day 2 - ELT pipeline implementation using dynamic tables
+=================================================================================================================
+Scenario
+Create leave table in the raw layer and create dynamic table 1 by joining employees with leaves table and create another dynamic table on top of the dynamic table 1
+
+Note: resume the tasks, dynamic tables before practise and suspend them when log off.
+
+alter dynamic table DT_DEMO_DB.CLEAN.EMPLOYEES_CLEAN_DT resume;
+ALTER TASK  dt_demo_db.raw.copy_emp_to_raw_task resume;
+
+Steps : 
+Source Layer
+1. create a new stage in the source layer 
+2. create a new folder in s3 bucket for leave information and upload leaves file into it.
+3. create a new external stage by referring the new folder created in the s3 bucket.
+3. list the files in the s3 bucket leave information using the new external stage.
+Raw Layer
+4. create a new table employee_leaves_raw.
+5. create a new pipe employee_leaves_raw_pipe to load data into the table employee_leaves_raw from the external stage.
+6. create a task to refresh the pipe for every 2 minutes.
+clean layer
+7. create a dynamic table dt_emp_leave_info in clean schema by joining the empoyees_raw and employee_leaves_raw tables.
+8. create a dynamic table on top of dd_tmp_leave_summary to build the analytics on top of the dynamic table dt_emp_leave_info.
+
+Source Layer:-
+==============
+Step 1:
+-- change context
+use schema dt_demo_db.source;
+USE ROLE sysadmin;
+
+Step 2: created a folder leaves in the s3 bucket and the bucket url is s3://b21-bucket-20240528/ELT-Pipeline/Source/csv/leaves/
+Step 3:
+--create external stage to read employee leaves information from s3 bucket.
+create or replace stage dt_demo_db.source.ext_stage_dt_leaves
+storage_integration = s3_int
+url = 's3://b21-bucket-20240528/ELT-Pipeline/Source/csv/leaves/'
+file_format = csv_format;
+
+Step 4: list the files in the external stage.
+
+list @dt_demo_db.source.ext_stage_dt_leaves;
+-------------------------------------------------------------------------------------------------------------------------------------------------
+name                                                                       |size |md5                             |last_modified                |
+---------------------------------------------------------------------------+-----+--------------------------------+-----------------------------+
+s3://b21-bucket-20240528/ELT-Pipeline/Source/csv/leaves/leave_records_1.csv|35074|75138a6ebd2b46c8471288aba69f4324|Wed, 29 May 2024 14:22:58 GMT|
+-------------------------------------------------------------------------------------------------------------------------------------------------
+select 
+	t.$1,t.$2,t.$3,t.$4,t.$5,t.$6,t.$7,
+	current_timestamp(),
+	metadata$file_row_number,
+	metadata$filename
+from @dt_demo_db.source.ext_stage_dt_leaves AS t
+LIMIT 10;
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------
+$1|$2          |$3        |$4        |$5        |$6|$7      |CURRENT_TIMESTAMP()    |METADATA$FILE_ROW_NUMBER|METADATA$FILENAME                                 |
+--+------------+----------+----------+----------+--+--------+-----------------------+------------------------+--------------------------------------------------+
+1 |Casual Leave|2023-10-13|2023-10-22|2023-10-24|3 |Approved|2024-05-30 00:52:03.155|                       1|ELT-Pipeline/Source/csv/leaves/leave_records_1.csv|
+1 |Casual Leave|2023-04-12|2023-04-18|2023-04-20|3 |Rejected|2024-05-30 00:52:03.155|                       2|ELT-Pipeline/Source/csv/leaves/leave_records_1.csv|
+1 |Sick Leave  |2022-11-20|2022-11-27|2022-11-29|3 |Approved|2024-05-30 00:52:03.155|                       3|ELT-Pipeline/Source/csv/leaves/leave_records_1.csv|
+1 |Casual Leave|2023-01-28|2023-02-02|2023-02-03|2 |Approved|2024-05-30 00:52:03.155|                       4|ELT-Pipeline/Source/csv/leaves/leave_records_1.csv|
+2 |Casual Leave|2022-12-13|2022-12-19|2022-12-21|3 |Approved|2024-05-30 00:52:03.155|                       5|ELT-Pipeline/Source/csv/leaves/leave_records_1.csv|
+2 |Casual Leave|2022-01-11|2022-01-20|2022-01-21|2 |Approved|2024-05-30 00:52:03.155|                       6|ELT-Pipeline/Source/csv/leaves/leave_records_1.csv|
+2 |Earn Leave  |2023-05-16|2023-05-24|2023-05-25|2 |Approved|2024-05-30 00:52:03.155|                       7|ELT-Pipeline/Source/csv/leaves/leave_records_1.csv|
+2 |Earn Leave  |2023-12-08|2023-12-16|2023-12-17|2 |Approved|2024-05-30 00:52:03.155|                       8|ELT-Pipeline/Source/csv/leaves/leave_records_1.csv|
+2 |Casual Leave|2023-03-20|2023-03-25|2023-03-26|2 |Approved|2024-05-30 00:52:03.155|                       9|ELT-Pipeline/Source/csv/leaves/leave_records_1.csv|
+3 |Casual Leave|2022-03-21|2022-03-27|2022-03-28|2 |Approved|2024-05-30 00:52:03.155|                      10|ELT-Pipeline/Source/csv/leaves/leave_records_1.csv|
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------
+Raw Layer:-
+===========
+Step 4. create a new table dt_demo_db.raw.emp_leave_raw 
+
+---change context
+use schema dt_demo_db.raw;
+
+USE role sysadmin;
+
+create or replace table dt_demo_db.raw.emp_leave_raw (
+    emp_id TEXT,
+    leave_type TEXT,
+    leave_applied_date DATE,
+    leave_start_date DATE,
+    leave_end_date DATE,
+    leave_days INTEGER,
+    status TEXT,
+    load_ts timestamp,
+    load_row_number number,
+    load_file_name text
+);
+
+Step 5 verify data before loading and create a snowpipe.
+select 
+   t.$1,t.$2,t.$3,t.$4,t.$5,t.$6,t.$7,
+   current_timestamp(),
+   metadata$file_row_number,
+   metadata$filename
+from @dt_demo_db.source.ext_stage_dt_leaves  (file_format=>'dt_demo_db.source.csv_format',pattern=>'.*leave.*[.]csv') as T
+LIMIT 10;
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------
+$1|$2          |$3        |$4        |$5        |$6|$7      |CURRENT_TIMESTAMP()    |METADATA$FILE_ROW_NUMBER|METADATA$FILENAME                                 |
+--+------------+----------+----------+----------+--+--------+-----------------------+------------------------+--------------------------------------------------+
+1 |Casual Leave|2023-10-13|2023-10-22|2023-10-24|3 |Approved|2024-05-30 01:03:02.275|                       1|ELT-Pipeline/Source/csv/leaves/leave_records_1.csv|
+1 |Casual Leave|2023-04-12|2023-04-18|2023-04-20|3 |Rejected|2024-05-30 01:03:02.275|                       2|ELT-Pipeline/Source/csv/leaves/leave_records_1.csv|
+1 |Sick Leave  |2022-11-20|2022-11-27|2022-11-29|3 |Approved|2024-05-30 01:03:02.275|                       3|ELT-Pipeline/Source/csv/leaves/leave_records_1.csv|
+1 |Casual Leave|2023-01-28|2023-02-02|2023-02-03|2 |Approved|2024-05-30 01:03:02.275|                       4|ELT-Pipeline/Source/csv/leaves/leave_records_1.csv|
+2 |Casual Leave|2022-12-13|2022-12-19|2022-12-21|3 |Approved|2024-05-30 01:03:02.275|                       5|ELT-Pipeline/Source/csv/leaves/leave_records_1.csv|
+2 |Casual Leave|2022-01-11|2022-01-20|2022-01-21|2 |Approved|2024-05-30 01:03:02.275|                       6|ELT-Pipeline/Source/csv/leaves/leave_records_1.csv|
+2 |Earn Leave  |2023-05-16|2023-05-24|2023-05-25|2 |Approved|2024-05-30 01:03:02.275|                       7|ELT-Pipeline/Source/csv/leaves/leave_records_1.csv|
+2 |Earn Leave  |2023-12-08|2023-12-16|2023-12-17|2 |Approved|2024-05-30 01:03:02.275|                       8|ELT-Pipeline/Source/csv/leaves/leave_records_1.csv|
+2 |Casual Leave|2023-03-20|2023-03-25|2023-03-26|2 |Approved|2024-05-30 01:03:02.275|                       9|ELT-Pipeline/Source/csv/leaves/leave_records_1.csv|
+3 |Casual Leave|2022-03-21|2022-03-27|2022-03-28|2 |Approved|2024-05-30 01:03:02.275|                      10|ELT-Pipeline/Source/csv/leaves/leave_records_1.csv|
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------
+Step 6 create pipe dt_demo_db.raw.employee_pipe_raw
+CREATE OR replace pipe dt_demo_db.raw.employee_leave_pipe_raw
+  auto_ingest = true
+  as 
+  copy into dt_demo_db.raw.emp_leave_raw from 
+  (
+   select     
+        t.$1,t.$2,t.$3,t.$4,t.$5,t.$6,t.$7,
+        current_timestamp(),
+        metadata$file_row_number,
+        metadata$filename
+   from @dt_demo_db.source.ext_stage_dt_leaves as t
+   ) file_format=dt_demo_db.source.csv_format on_error=continue;
+---------------------------------------------
+status                                      |
+--------------------------------------------+
+Pipe EMP_LEAVE_PIPE_RAW successfully created.|
+---------------------------------------------
+
+
+Step 7 Create a task
+create or replace task dt_demo_db.raw.copy_emp_leave_to_raw_task
+    warehouse = compute_wh
+    schedule = '2 minute'
+    as
+    alter pipe dt_demo_db.raw.employee_leave_pipe_raw refresh;
+
+-- check the objects + task graph home home page.
+
+-- Make sure that your user must have necessary privileges
+
+-- lets resume the task
+alter task dt_demo_db.raw.copy_emp_leave_to_raw_task resume;
+
+select current_timestamp() timestamp,count(*) from dt_demo_db.raw.emp_leave_raw;
+---------------------------------
+TIMESTAMP              |COUNT(*)|
+-----------------------+--------+
+2024-05-30 01:07:56.195|       0|
+---------------------------------
+
+check the data after 2 minutes
+---------------------------------
+TIMESTAMP              |COUNT(*)|
+-----------------------+--------+
+2024-05-30 01:29:00.636|     582|
+---------------------------------
+
+Creating Dynamic tables on top of RAW layer tables.
+
+USE ROLE SYSDAMIN;
+USE WAREHOUSE COMPUTE_WH;
+USE SCHEMA DT_DEMO_DB.CLEAN;
+
+select 
+e.emp_id,
+e.first_name,
+e.last_name,
+e.date_of_birth,
+e.date_of_joining,
+e.email_address,
+e.department,
+e.designation,
+e.level,
+e.office_location,
+e.active,
+count(l.leave_type) as total_leave_count 
+from dt_demo_db.raw.employee_raw e
+left outer join dt_demo_db.raw.emp_leave_raw l on e.emp_id=l.emp_id 
+where e.active='Yes'
+and l.status='Approved' 
+group by  e.emp_id,e.first_name,e.last_name,e.date_of_birth,e.date_of_joining,
+e.email_address,e.department,e.designation,e.level,e.office_location,e.active
+LIMIT 20;
+
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+EMP_ID|FIRST_NAME|LAST_NAME|DATE_OF_BIRTH|DATE_OF_JOINING|EMAIL_ADDRESS                |DEPARTMENT             |DESIGNATION                  |LEVEL|OFFICE_LOCATION|ACTIVE|TOTAL_LEAVE_COUNT|
+------+----------+---------+-------------+---------------+-----------------------------+-----------------------+-----------------------------+-----+---------------+------+-----------------+
+1     |Sarah     |Simpson  |   1984-01-20|     2019-08-01|sarah.simpson_1@gmail.com    |IT                     |Director                     |L2   |Oita           |Yes   |                3|
+2     |Anthony   |Wilkerson|   1960-01-01|     2023-04-20|anthony.wilkerson_2@gmail.com|HR                     |Team Leader                  |L2   |Leicester      |Yes   |                5|
+3     |Heather   |Hahn     |   2001-12-02|     2019-06-17|heather.hahn_3@gmail.com     |Medical Affairs        |HR Business Partner          |L2   |Leeds          |Yes   |                8|
+4     |Jane      |Brady    |   1980-04-17|     2021-02-15|jane.brady_4@gmail.com       |Supply Chain Management|HR Business Partner          |L3   |Newcastle      |Yes   |                8|
+5     |William   |Dougherty|   1993-10-07|     2023-12-18|william.dougherty_5@gmail.com|Sales                  |Data Analyst                 |L5   |Nantes         |Yes   |                5|
+6     |Shawn     |Hernandez|   1977-09-24|     2020-10-06|shawn.hernandez_6@gmail.com  |Sales                  |Director                     |L4   |Mumbai         |Yes   |                6|
+8     |Jonathan  |Cooper   |   1977-10-08|     2019-01-04|jonathan.cooper_8@gmail.com  |Research & Development |Research Scientist           |L1   |Nottingham     |Yes   |                2|
+9     |Paula     |Hernandez|   1980-12-10|     2020-04-18|paula.hernandez_9@gmail.com  |Legal                  |Finance Controller           |L1   |Nagpur         |Yes   |                6|
+10    |Janet     |Paul     |   1958-11-08|     2020-02-12|janet.paul_10@gmail.com      |Compliance             |Research Scientist           |L4   |Seattle        |Yes   |                3|
+12    |Donald    |Garcia   |   1990-09-18|     2023-08-22|donald.garcia_12@gmail.com   |Regulatory Affairs     |Regulatory Affairs Specialist|L1   |Lucknow        |Yes   |               10|
+13    |Kristie   |Kidd     |   1967-02-12|     2022-10-05|kristie.kidd_13@gmail.com    |Finance                |HR Business Partner          |L2   |Kyoto          |Yes   |                2|
+17    |Billy     |Hill     |   1974-02-11|     2022-06-05|billy.hill_17@gmail.com      |Legal                  |Systems Analyst              |L1   |Chennai        |Yes   |                9|
+18    |Mark      |Mann     |   1959-08-26|     2022-01-01|mark.mann_18@gmail.com       |IT                     |Medical Writer               |L3   |Toulouse       |Yes   |                8|
+19    |Emma      |Delgado  |   1983-11-11|     2021-11-09|emma.delgado_19@gmail.com    |Research & Development |Finance Controller           |L3   |Oita           |Yes   |                7|
+22    |Erin      |Johnson  |   1964-05-08|     2021-01-18|erin.johnson_22@gmail.com    |Finance                |Data Analyst                 |L4   |Nottingham     |Yes   |                3|
+24    |Gary      |Ramos    |   1962-03-04|     2021-08-21|gary.ramos_24@gmail.com      |Medical Affairs        |HR Business Partner          |L4   |Kumamoto       |Yes   |                5|
+25    |Dylan     |Wilson   |   1975-04-24|     2021-02-18|dylan.wilson_25@gmail.com    |Legal                  |Regulatory Affairs Specialist|L3   |Cardiff        |Yes   |               10|
+28    |Ariel     |Roth     |   1993-04-27|     2022-01-01|ariel.roth_28@gmail.com      |Supply Chain Management|Finance Controller           |L4   |Newcastle      |Yes   |                3|
+35    |Mark      |Gilbert  |   1986-02-05|     2021-11-16|mark.gilbert_35@gmail.com    |Research & Development |Regulatory Affairs Specialist|L4   |Nottingham     |Yes   |                7|
+38    |Renee     |Johnson  |   1987-03-01|     2019-05-13|renee.johnson_38@gmail.com   |Legal                  |Senior Vice President        |L5   |Chennai        |Yes   |                2|
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+create dynamic table dt_demo_db.clean.emp_leave_clean_dt
+target_lag='2 minutes'
+warehouse=compute_wh
+as
+select 
+e.emp_id,
+e.first_name,
+e.last_name,
+e.date_of_birth,
+e.date_of_joining,
+e.email_address,
+e.department,
+e.designation,
+e.level,
+e.office_location,
+e.active,
+count(l.leave_type) as total_leave_count 
+from dt_demo_db.raw.employee_raw e
+left outer join dt_demo_db.raw.emp_leave_raw l on e.emp_id=l.emp_id 
+where e.active='Yes'
+and l.status='Approved' 
+group by  e.emp_id,e.first_name,e.last_name,e.date_of_birth,e.date_of_joining,
+e.email_address,e.department,e.designation,e.level,e.office_location,e.active;
+
+SELECT current_timestamp() AS timestamp, count(*) FROM dt_demo_db.clean.emp_leave_clean_dt;
+---------------------------------
+TIMESTAMP              |COUNT(*)|
+-----------------------+--------+
+2024-05-30 22:48:57.169|      95|
+---------------------------------
+
+creating a dynamic table using CTE common table expression.
+
+CREATE OR REPLACE DYNAMIC TABLE dt_demo_db.clean.leave_by_category_dt
+TARGET_LAG='2 minutes'
+warehouse=compute_wh
+AS
+WITH MonthlyLeave AS (
+SELECT 
+    month(leave_start_date) AS leave_month,
+    year(leave_start_date) AS leave_year,
+    leave_type,
+    SUM(leave_days) AS total_leave_days
+FROM
+   dt_demo_db.raw.emp_leave_raw
+group by leave_month,
+         leave_year,
+         leave_type
+)
+SELECT
+   leave_month,
+   leave_year,
+   leave_type,
+   total_leave_days,
+   AVG(total_leave_days) OVER(PARTITION by leave_type,leave_year ORDER BY leave_month) AS avg_leave_per_month,
+   month(current_timestamp()) AS current_month 
+from MonthlyLeave
+order by 
+    leave_year,
+    leave_month,
+    leave_type;
+	
+SELECT *
+FROM dt_demo_db.clean.leave_by_category_dt
+LIMIT 20;
+---------------------------------------------------------------------------------------
+LEAVE_MONTH|LEAVE_YEAR|LEAVE_TYPE  |TOTAL_LEAVE_DAYS|AVG_LEAVE_PER_MONTH|CURRENT_MONTH|
+-----------+----------+------------+----------------+-------------------+-------------+
+         12|      2021|Casual Leave|               6|           6.000000|            5|
+         12|      2021|Earn Leave  |               4|           4.000000|            5|
+         12|      2021|Sick Leave  |               6|           6.000000|            5|
+          1|      2022|Casual Leave|              35|          35.000000|            5|
+          1|      2022|Earn Leave  |              15|          15.000000|            5|
+          1|      2022|Sick Leave  |              11|          11.000000|            5|
+          2|      2022|Casual Leave|              39|          37.000000|            5|
+          2|      2022|Earn Leave  |              42|          28.500000|            5|
+          2|      2022|Sick Leave  |               3|           7.000000|            5|
+          3|      2022|Casual Leave|              55|          43.000000|            5|
+          3|      2022|Earn Leave  |              13|          23.333333|            5|
+          3|      2022|Sick Leave  |              19|          11.000000|            5|
+          4|      2022|Casual Leave|              34|          40.750000|            5|
+          4|      2022|Earn Leave  |              20|          22.500000|            5|
+          4|      2022|Sick Leave  |               3|           9.000000|            5|
+          5|      2022|Casual Leave|              49|          42.400000|            5|
+          5|      2022|Earn Leave  |              15|          21.000000|            5|
+          5|      2022|Sick Leave  |               6|           8.400000|            5|
+          6|      2022|Casual Leave|              50|          43.666667|            5|
+          6|      2022|Earn Leave  |              16|          20.166667|            5|
+---------------------------------------------------------------------------------------
+		  
+Creating a dynamic table on top of another dynamic table.
+Note: The target_lag should be greater or equal to the parent dynamic table.
+
+
+CREATE OR REPLACE DYNAMIC TABLE dt_demo_db.clean.total_leave_dt
+ target_lag='2 minutes'
+ warehouse=compute_wh
+ as
+select 
+ department,
+ sum(total_leave_count) as total_leave_sum
+ from dt_demo_db.clean.emp_leave_clean_dt
+ group by department
+ order by department;
+ 
+SELECT *
+FROM dt_demo_db.clean.total_leave_dt;
+----------------------------------------
+DEPARTMENT             |TOTAL_LEAVE_SUM|
+-----------------------+---------------+
+Clinical Operations    |             31|
+Compliance             |             31|
+Finance                |             12|
+HR                     |             23|
+IT                     |             36|
+Legal                  |             50|
+Marketing              |             35|
+Medical Affairs        |             31|
+Production             |             41|
+Quality Assurance      |             27|
+Regulatory Affairs     |             41|
+Research & Development |             43|
+Sales                  |             49|
+Supply Chain Management|             26|
+Support                |             26|
+----------------------------------------
+Check the dynamic details in a separate windonw, understand the Graph and Refresh History.
+
+To save the credits put all the dynamic tables into suspend status.
+PUT ALL the DYNAMIC TABLES INTO SUSPEND status
+
+USE dt_demo_db.clean;
+SHOW DYNAMIC TABLES;
+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+created_on             |name                |database_name|schema_name|cluster_by|rows|bytes|owner       |target_lag|refresh_mode|refresh_mode_reason                                                                                                               |warehouse |comment|text                                                                                                                                                                                                                                                           |automatic_clustering|scheduling_state|last_suspended_on      |is_clone|is_replica|data_timestamp         |owner_role_type|
+-----------------------+--------------------+-------------+-----------+----------+----+-----+------------+----------+------------+----------------------------------------------------------------------------------------------------------------------------------+----------+-------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+--------------------+----------------+-----------------------+--------+----------+-----------------------+---------------+
+2024-05-29 00:51:10.040|EMPLOYEES_CLEAN_DT  |DT_DEMO_DB   |CLEAN      |          | 104|13312|SYSADMIN    |2 minutes |INCREMENTAL |                                                                                                                                  |COMPUTE_WH|       |create or replace dynamic table ¶    dt_demo_db.clean.employees_clean_dt¶    (¶        emp_id,¶        first_name,¶        last_name,¶        dob comment 'Date of Birth',¶        doj comment 'Date of Joining',¶        email comment 'Email Address',¶      |OFF                 |ACTIVE          |2024-05-30 23:12:05.213|false   |false     |2024-05-30 23:10:42.489|ROLE           |
+2024-05-30 22:48:04.071|EMP_LEAVE_CLEAN_DT  |DT_DEMO_DB   |CLEAN      |          |  95|14336|ACCOUNTADMIN|2 minutes |INCREMENTAL |                                                                                                                                  |COMPUTE_WH|       |create dynamic table dt_demo_db.clean.emp_leave_clean_dt¶¶ lag = '2 minutes' refresh_mode = 'AUTO' initialize = 'ON_CREATE' warehouse = COMPUTE_WH¶as¶select ¶e.emp_id,¶e.first_name,¶e.last_name,¶e.date_of_birth,¶e.date_of_joining,¶e.email_address,¶e.depar|OFF                 |ACTIVE          |2024-05-30 23:14:45.587|false   |false     |2024-05-30 23:13:54.489|ROLE           |
+2024-05-30 22:58:07.601|LEAVE_BY_CATEGORY_DT|DT_DEMO_DB   |CLEAN      |          |  71| 3584|ACCOUNTADMIN|2 minutes |FULL        |Query contains the function 'CURRENT_TIMESTAMP', but change tracking is not supported on queries with non-deterministic functions.|COMPUTE_WH|       |CREATE OR REPLACE DYNAMIC TABLE dt_demo_db.clean.leave_by_category_dt¶¶ lag = '2 minutes' refresh_mode = 'AUTO' initialize = 'ON_CREATE' warehouse = COMPUTE_WH¶AS¶WITH MonthlyLeave AS (¶SELECT ¶    month(leave_start_date) AS leave_month,¶    year(leave_st|OFF                 |ACTIVE          |2024-05-30 23:14:48.810|false   |false     |2024-05-30 23:13:54.489|ROLE           |
+2024-05-30 23:02:42.278|TOTAL_LEAVE_DT      |DT_DEMO_DB   |CLEAN      |          |  15| 3072|ACCOUNTADMIN|2 minutes |INCREMENTAL |                                                                                                                                  |COMPUTE_WH|       |CREATE OR REPLACE DYNAMIC TABLE dt_demo_db.clean.total_leave_dt¶ ¶ ¶ lag = '2 minutes' refresh_mode = 'AUTO' initialize = 'ON_CREATE' warehouse = COMPUTE_WH as¶select ¶ department,¶ sum(total_leave_count) as total_leave_sum¶ from dt_demo_db.clean.emp_leav|OFF                 |ACTIVE          |2024-05-30 23:14:45.587|false   |false     |2024-05-30 23:13:54.489|ROLE           |
+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+ALTER DYNAMIC TABLE dt_demo_db.clean.EMPLOYEES_CLEAN_DT SUSPEND;
+---------------------------------
+status                          |
+--------------------------------+
+Statement executed successfully.|
+---------------------------------
+
+ALTER DYNAMIC TABLE dt_demo_db.clean.EMP_LEAVE_CLEAN_DT  SUSPEND;
+---------------------------------
+status                          |
+--------------------------------+
+Statement executed successfully.|
+---------------------------------
+
+ALTER DYNAMIC TABLE dt_demo_db.clean.LEAVE_BY_CATEGORY_DT SUSPEND;
+---------------------------------
+status                          |
+--------------------------------+
+Statement executed successfully.|
+---------------------------------
+
+ALTER DYNAMIC TABLE dt_demo_db.clean.TOTAL_LEAVE_DT  SUSPEND;
+---------------------------------
+status                          |
+--------------------------------+
+Statement executed successfully.|
+---------------------------------
+
+SHOW DYNAMIC TABLES;
+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+created_on             |name                |database_name|schema_name|cluster_by|rows|bytes|owner       |target_lag|refresh_mode|refresh_mode_reason                                                                                                               |warehouse |comment|text                                                                                                                                                                                                                                                           |automatic_clustering|scheduling_state|last_suspended_on      |is_clone|is_replica|data_timestamp         |owner_role_type|
+-----------------------+--------------------+-------------+-----------+----------+----+-----+------------+----------+------------+----------------------------------------------------------------------------------------------------------------------------------+----------+-------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+--------------------+----------------+-----------------------+--------+----------+-----------------------+---------------+
+2024-05-29 00:51:10.040|EMPLOYEES_CLEAN_DT  |DT_DEMO_DB   |CLEAN      |          | 104|13312|SYSADMIN    |2 minutes |INCREMENTAL |                                                                                                                                  |COMPUTE_WH|       |create or replace dynamic table ¶    dt_demo_db.clean.employees_clean_dt¶    (¶        emp_id,¶        first_name,¶        last_name,¶        dob comment 'Date of Birth',¶        doj comment 'Date of Joining',¶        email comment 'Email Address',¶      |OFF                 |SUSPENDED       |2024-05-30 23:12:05.213|false   |false     |2024-05-30 23:10:42.489|ROLE           |
+2024-05-30 22:48:04.071|EMP_LEAVE_CLEAN_DT  |DT_DEMO_DB   |CLEAN      |          |  95|14336|ACCOUNTADMIN|2 minutes |INCREMENTAL |                                                                                                                                  |COMPUTE_WH|       |create dynamic table dt_demo_db.clean.emp_leave_clean_dt¶¶ lag = '2 minutes' refresh_mode = 'AUTO' initialize = 'ON_CREATE' warehouse = COMPUTE_WH¶as¶select ¶e.emp_id,¶e.first_name,¶e.last_name,¶e.date_of_birth,¶e.date_of_joining,¶e.email_address,¶e.depar|OFF                 |SUSPENDED       |2024-05-30 23:14:45.587|false   |false     |2024-05-30 23:13:54.489|ROLE           |
+2024-05-30 22:58:07.601|LEAVE_BY_CATEGORY_DT|DT_DEMO_DB   |CLEAN      |          |  71| 3584|ACCOUNTADMIN|2 minutes |FULL        |Query contains the function 'CURRENT_TIMESTAMP', but change tracking is not supported on queries with non-deterministic functions.|COMPUTE_WH|       |CREATE OR REPLACE DYNAMIC TABLE dt_demo_db.clean.leave_by_category_dt¶¶ lag = '2 minutes' refresh_mode = 'AUTO' initialize = 'ON_CREATE' warehouse = COMPUTE_WH¶AS¶WITH MonthlyLeave AS (¶SELECT ¶    month(leave_start_date) AS leave_month,¶    year(leave_st|OFF                 |SUSPENDED       |2024-05-30 23:14:48.810|false   |false     |2024-05-30 23:13:54.489|ROLE           |
+2024-05-30 23:02:42.278|TOTAL_LEAVE_DT      |DT_DEMO_DB   |CLEAN      |          |  15| 3072|ACCOUNTADMIN|2 minutes |INCREMENTAL |                                                                                                                                  |COMPUTE_WH|       |CREATE OR REPLACE DYNAMIC TABLE dt_demo_db.clean.total_leave_dt¶ ¶ ¶ lag = '2 minutes' refresh_mode = 'AUTO' initialize = 'ON_CREATE' warehouse = COMPUTE_WH as¶select ¶ department,¶ sum(total_leave_count) as total_leave_sum¶ from dt_demo_db.clean.emp_leav|OFF                 |SUSPENDED       |2024-05-30 23:14:45.587|false   |false     |2024-05-30 23:13:54.489|ROLE           |
+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+SUSPENDING THE TASKS in the RAW Layer;
+
+use dt_demo_db.raw;
+use role sysadmin;
+show tasks;
+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+created_on             |name                      |id                                  |database_name|schema_name|owner   |comment|warehouse |schedule|predecessors|state  |definition                                               |condition|allow_overlapping_execution|error_integration|last_committed_on      |last_suspended_on|owner_role_type|config|budget|task_relations     |last_suspended_reason|
+-----------------------+--------------------------+------------------------------------+-------------+-----------+--------+-------+----------+--------+------------+-------+---------------------------------------------------------+---------+---------------------------+-----------------+-----------------------+-----------------+---------------+------+------+-------------------+---------------------+
+2024-05-30 01:26:21.968|COPY_EMP_LEAVE_TO_RAW_TASK|01b4a79e-5472-61ce-0000-000000000009|DT_DEMO_DB   |RAW        |SYSADMIN|       |COMPUTE_WH|2 minute|[]          |started|alter pipe dt_demo_db.raw.employee_leave_pipe_raw refresh|         |false                      |null             |2024-05-30 01:26:31.120|                 |ROLE           |      |      |{"Predecessors":[]}|                     |
+2024-05-30 01:38:41.643|COPY_EMP_TO_RAW_TASK      |01b4a7aa-99fc-662e-0000-00000000000a|DT_DEMO_DB   |RAW        |SYSADMIN|       |COMPUTE_WH|3 minute|[]          |started|alter pipe dt_demo_db.raw.employee_pipe_raw refresh      |         |false                      |null             |2024-05-30 01:38:56.331|                 |ROLE           |      |      |{"Predecessors":[]}|                     |
+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+alter task dt_demo_db.raw.COPY_EMP_LEAVE_TO_RAW_TASK suspend;
+alter task dt_demo_db.raw.COPY_EMP_TO_RAW_TASK suspend;
+
+show tasks;
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+created_on             |name                      |id                                  |database_name|schema_name|owner   |comment|warehouse |schedule|predecessors|state    |definition                                               |condition|allow_overlapping_execution|error_integration|last_committed_on      |last_suspended_on      |owner_role_type|config|budget|task_relations     |last_suspended_reason|
+-----------------------+--------------------------+------------------------------------+-------------+-----------+--------+-------+----------+--------+------------+---------+---------------------------------------------------------+---------+---------------------------+-----------------+-----------------------+-----------------------+---------------+------+------+-------------------+---------------------+
+2024-05-30 01:26:21.968|COPY_EMP_LEAVE_TO_RAW_TASK|01b4a79e-5472-61ce-0000-000000000009|DT_DEMO_DB   |RAW        |SYSADMIN|       |COMPUTE_WH|2 minute|[]          |suspended|alter pipe dt_demo_db.raw.employee_leave_pipe_raw refresh|         |false                      |null             |2024-05-30 01:26:31.120|2024-05-30 23:22:33.283|ROLE           |      |      |{"Predecessors":[]}|USER_SUSPENDED       |
+2024-05-30 01:38:41.643|COPY_EMP_TO_RAW_TASK      |01b4a7aa-99fc-662e-0000-00000000000a|DT_DEMO_DB   |RAW        |SYSADMIN|       |COMPUTE_WH|3 minute|[]          |suspended|alter pipe dt_demo_db.raw.employee_pipe_raw refresh      |         |false                      |null             |2024-05-30 01:38:56.331|2024-05-30 23:22:37.238|ROLE           |      |      |{"Predecessors":[]}|USER_SUSPENDED       |
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
