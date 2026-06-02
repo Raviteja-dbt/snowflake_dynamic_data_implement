@@ -1,0 +1,1 @@
+# snowflake_dynamic_data_implement
